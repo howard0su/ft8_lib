@@ -74,3 +74,5 @@ precision = (n_total - n_extra) / float(n_total + n_extra)  # or adjust based on
 print('Precision: %.1f%%' % (100 * precision,))
 f1_score = 2 * (precision * recall) / (precision + recall)
 print('F1 Score: %.1f%%' % (100 * f1_score,))
+
+print('%d (%.1f%%)|%d (%.1f%%)|%.1f%%|%.1f%%|%.1f%%' % (n_extra, 100.0*n_extra/n_total, n_missed, 100.0*n_missed/n_total, 100 * recall, 100 * precision, 100 * f1_score))
