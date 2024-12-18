@@ -2,6 +2,7 @@
 #include "constants.h"
 #include "crc.h"
 #include "ldpc.h"
+#include "osd.h"
 
 #include <stdbool.h>
 #include <math.h>
@@ -344,7 +345,18 @@ bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand
 
     if (status->ldpc_errors > 0)
     {
-        return false;
+        if (status->ldpc_errors <= 25)
+        {
+            int got_depth = -1;
+            if (!osd_decode(log174, 0, plain174, &got_depth))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
     }
 
     // Extract payload + CRC (first FTX_LDPC_K bits) packed into a byte array

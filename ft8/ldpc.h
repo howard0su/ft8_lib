@@ -14,6 +14,8 @@ extern "C"
 // ok == 87 means success.
 void ldpc_decode(float codeword[], int max_iters, uint8_t plain[], int* ok);
 
+void ldpc_encode(uint8_t plain[], uint8_t codeword[]);
+
 void bp_decode(float codeword[], int max_iters, uint8_t plain[], int* ok);
 
 #ifdef __cplusplus
