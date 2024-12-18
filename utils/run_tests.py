@@ -23,8 +23,6 @@ def recursive_listdir(wav_dir):
     return items
 
 wav_dir = sys.argv[1]
-print(recursive_listdir(wav_dir))
-print(os.listdir(wav_dir))
 wav_files = recursive_listdir(wav_dir)
 wav_files = [f for f in wav_files if os.path.isfile(f) and os.path.splitext(f)[1] == '.wav']
 txt_files = [os.path.splitext(f)[0] + '.txt' for f in wav_files]
