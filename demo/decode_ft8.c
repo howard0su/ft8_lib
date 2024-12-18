@@ -4,7 +4,6 @@
 #include <math.h>
 #include <stdbool.h>
 #include <time.h>
-#include <linux/time.h>
 
 #include "ft8/decode.h"
 #include "ft8/encode.h"
