@@ -348,7 +348,7 @@ bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand
         if (status->ldpc_errors <= 25)
         {
             int got_depth = -1;
-            if (!osd_decode(log174, 0, plain174, &got_depth))
+            if (!osd_decode(log174, 6, plain174, &got_depth))
             {
                 return false;
             }

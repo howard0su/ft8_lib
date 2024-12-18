@@ -353,7 +353,6 @@ int osd_decode(float codeword[FTX_LDPC_N], int depth, uint8_t out[FTX_LDPC_K], i
         return 1;
     }
 
-#if 0
     uint8_t best_plain[FTX_LDPC_K];
     float best_score = 0;
     int got_a_best = 0;
@@ -387,8 +386,6 @@ int osd_decode(float codeword[FTX_LDPC_N], int depth, uint8_t out[FTX_LDPC_K], i
         return 1;
     }
     else
-#endif
-
     {
         return 0;
     }
