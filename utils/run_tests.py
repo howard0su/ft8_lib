@@ -14,8 +14,18 @@ def parse(line):
         source = '<...>'
     return ' '.join([dest, source, report])
 
+def recursive_listdir(wav_dir):
+    items = []
+    for root, dirs, files in os.walk(wav_dir):
+        # Combine directory and files to mimic os.listdir
+        items.extend([os.path.join(root, d) for d in dirs])
+        items.extend([os.path.join(root, f) for f in files])
+    return items
+
 wav_dir = sys.argv[1]
-wav_files = [os.path.join(wav_dir, f) for f in os.listdir(wav_dir)]
+print(recursive_listdir(wav_dir))
+print(os.listdir(wav_dir))
+wav_files = recursive_listdir(wav_dir)
 wav_files = [f for f in wav_files if os.path.isfile(f) and os.path.splitext(f)[1] == '.wav']
 txt_files = [os.path.splitext(f)[0] + '.txt' for f in wav_files]
 
