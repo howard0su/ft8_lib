@@ -4,18 +4,19 @@
 #include <math.h>
 #include <stdbool.h>
 #include <time.h>
+#include <linux/time.h>
 
-#include <ft8/decode.h>
-#include <ft8/encode.h>
-#include <ft8/message.h>
+#include "ft8/decode.h"
+#include "ft8/encode.h"
+#include "ft8/message.h"
 
-#include <common/common.h>
-#include <common/wave.h>
-#include <common/monitor.h>
-#include <common/audio.h>
+#include "common/common.h"
+#include "common/wave.h"
+#include "common/monitor.h"
+#include "common/audio.h"
 
 #define LOG_LEVEL LOG_INFO
-#include <ft8/debug.h>
+#include "ft8/debug.h"
 
 const int kMin_score = 10; // Minimum sync score threshold for candidates
 const int kMax_candidates = 140;
