@@ -116,6 +116,9 @@ void monitor_free(monitor_t* me)
 {
     waterfall_free(&me->wf);
     free(me->fft_work);
+#ifdef WATERFALL_USE_PHASE
+    free(me->ifft_work);
+#endif
     free(me->last_frame);
     free(me->window);
 }
@@ -192,7 +195,18 @@ void monitor_process(monitor_t* me, const float* frame)
 }
 
 #ifdef WATERFALL_USE_PHASE
-void monitor_resynth(const monitor_t* me, const candidate_t* candidate, float* signal)
+/**
+ * Re-synthesize a signal from the frequency domain representation of a candidate.
+ *
+ * This function takes a candidate's frequency domain data and converts it back to a time domain
+ * signal using inverse FFT. The process includes extracting frequency data around the selected 
+ * candidate, applying a tapering window, and performing overlap-add synthesis.
+ *
+ * @param me Pointer to a monitor_t structure containing the waterfall data and FFT configurations.
+ * @param candidate Pointer to an ftx_candidate_t structure representing the candidate to synthesize.
+ * @param signal Output buffer to store the synthesized time domain signal.
+ */
+void monitor_resynth(const monitor_t* me, const ftx_candidate_t* candidate, float* signal)
 {
     const int num_ifft = me->nifft;
     const int num_shift = num_ifft / 2;
