@@ -25,7 +25,7 @@ const int kLDPC_iterations = 25;
 const int kMax_decoded_messages = 50;
 
 const int kFreq_osr = 2; // Frequency oversampling rate (bin subdivision)
-const int kTime_osr = 2; // Time oversampling rate (symbol subdivision)
+const int kTime_osr = 4; // Time oversampling rate (symbol subdivision)
 
 void usage(const char* error_msg)
 {

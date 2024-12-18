@@ -10,9 +10,11 @@ The decoder is designed with memory and computing efficiency in mind, in order t
 
 # Improvement over the original lib
 
-* Improve regression tests, use wsjt-x result as baseline, the base score is: Total: 1514, extra: 14 (0.9%), missed: 480 (31.7%) Recall: 68.3%
-* Add OSD decoder                                                           : Total: 1514, extra: 15 (1.0%), missed: 466 (30.8%) Recall: 69.2%
-* Finetune time offset
+|Change|Extra|Missed|Recall|Precision|F1 Score|
+|---|---|---|----|-----|----|
+| Improve regression tests, use wsjt-x result as baseline|14 (0.9%)| 480 (31.7%) | 68.3% | 98.2% |80.6%|
+|Add OSD decoder |15 (1.0%)|466 (30.8%) | 69.2% | 97.9%| 81.1%|
+| Increase time oversampling from 2 to 4| 18 (1.2%) | 442 (29.2%)|70.8%|97.7%|82.1%|
 
 # Current state
 
