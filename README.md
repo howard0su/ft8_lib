@@ -8,6 +8,12 @@ The encoding process is relatively light on resources, and an Arduino should be 
 
 The decoder is designed with memory and computing efficiency in mind, in order to be usable with a fast enough microcontroller. It is shown to be working on STM32F7 boards fast enough for real work, but the embedded application itself is beyond this repository. This repository provides an example decoder which can decode a 15-second WAV file on a desktop machine or SBC. The decoder needs to access the whole 15-second window in spectral magnitude representation (the window can be also shorter, and messages can have varying starting time within the window). The example FT8 decoder can work with slightly less than 200 KB of RAM. 
 
+# Improvement over the original lib
+
+* Improve regression tests, use wsjt-x result as baseline, the base score is: Total: 1514, extra: 14 (0.9%), missed: 480 (31.7%) Recall: 68.3%
+* Add OSD decoder                                                           : Total: 1514, extra: 15 (1.0%), missed: 466 (30.8%) Recall: 69.2%
+* Finetune time offset
+
 # Current state
 
 Currently the basic message set for establishing QSOs, as well as telemetry and free-text message modes are supported:
