@@ -71,3 +71,8 @@ print('Total: %d, extra: %d (%.1f%%), missed: %d (%.1f%%)' %
         (n_total, n_extra, 100.0*n_extra/n_total, n_missed, 100.0*n_missed/n_total))
 recall = (n_total - n_missed) / float(n_total)
 print('Recall: %.1f%%' % (100*recall, ))
+
+precision = (n_total - n_extra) / float(n_total + n_extra)  # or adjust based on definitions
+print('Precision: %.1f%%' % (100 * precision,))
+f1_score = 2 * (precision * recall) / (precision + recall)
+print('F1 Score: %.1f%%' % (100 * f1_score,))
