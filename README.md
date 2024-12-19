@@ -16,7 +16,9 @@ The decoder is designed with memory and computing efficiency in mind, in order t
 |Add OSD decoder |15 (1.0%)|466 (30.8%) | 69.2% | 97.9%| 81.1%|
 |Increase time oversampling from 2 to 4| 18 (1.2%) | 442 (29.2%)|70.8%|97.7%|82.1%|
 |Enable OSD deep decode|19 (1.3%)|436 (28.8%)| 71.2% | 97.5% | 82.3%
-|substract right after decode|20 (1.3%)|415 (27.4%)|72.6%|97.4%|83.2%
+|substract encoded messages|20 (1.3%)|415 (27.4%)|72.6%|97.4%|83.2%
+|two passes decode|24 (1.6%)|403 (26.6%)|73.4%|96.9%|83.5%
+|Lower canidate threshold to 5|23 (1.5%)|402 (26.6%)|73.4%|97.0%|83.6%
 
 # Current state
 

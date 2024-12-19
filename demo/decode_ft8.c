@@ -17,7 +17,7 @@
 #define LOG_LEVEL LOG_INFO
 #include "ft8/debug.h"
 
-const int kMin_score = 10; // Minimum sync score threshold for candidates
+const int kMin_score = 5; // Minimum sync score threshold for candidates
 const int kMax_candidates = 140;
 const int kLDPC_iterations = 25;
 
@@ -131,7 +131,6 @@ void decode(const monitor_t* mon, struct tm* tm_slot_start)
     const ftx_waterfall_t* wf = &mon->wf;
     // Find top candidates by Costas sync score and localize them in time and frequency
     ftx_candidate_t candidate_list[kMax_candidates];
-    int num_candidates = ftx_find_candidates(wf, kMax_candidates, candidate_list, kMin_score);
 
     // Hash table for decoded messages (to check for duplicates)
     int num_decoded = 0;
@@ -143,6 +142,9 @@ void decode(const monitor_t* mon, struct tm* tm_slot_start)
     {
         decoded_hashtable[i] = NULL;
     }
+
+    for (int pass = 0; pass < 2; pass++) {
+    int num_candidates = ftx_find_candidates(wf, kMax_candidates, candidate_list, kMin_score);
 
     // Go over candidates and attempt to decode messages
     for (int idx = 0; idx < num_candidates; ++idx)
@@ -224,6 +226,7 @@ void decode(const monitor_t* mon, struct tm* tm_slot_start)
                 tm_slot_start->tm_hour, tm_slot_start->tm_min, tm_slot_start->tm_sec,
                 snr, time_sec, freq_hz, text);
         }
+    }
     }
     LOG(LOG_INFO, "Decoded %d messages, callsign hashtable size %d\n", num_decoded, callsign_hashtable_size);
     hashtable_cleanup(10);
