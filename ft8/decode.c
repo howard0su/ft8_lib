@@ -327,8 +327,8 @@ static void ftx_normalize_logl(float* log174)
 }
 
 int ftx_substract(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate, uint8_t *tones, uint8_t n_tones) {
-    int noise = 0;
-    int signal = 0;
+    float noise = 0;
+    float signal = 0;
     int num_average = 0;
     int n_items = (wf->protocol == FTX_PROTOCOL_FT8) ? 8 : 4;
 
@@ -345,21 +345,21 @@ int ftx_substract(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate, u
         // Get the pointer to symbol 'block' of the candidate
         const WF_ELEM_T* wf_el = mag_cand + (i * wf->block_stride);
 
-        int noise_val = 255;
+        float noise_val = 100000.0;
         for (int s = 0; s < n_items; s++) {
             if (s == tones[i])
                 continue;
-            if (wf_el[s] < noise_val)
-                noise_val = wf_el[s];
+            if (WF_ELEM_MAG(wf_el[s]) < noise_val)
+                noise_val = WF_ELEM_MAG(wf_el[s]);
         }
         noise += noise_val;
-        signal += wf_el[tones[i]];
+        signal += WF_ELEM_MAG(wf_el[tones[i]]);
         num_average++;
     }
 
     noise /= num_average;
     signal /= num_average;
-    int snr = signal - noise;
+    float snr = signal - noise;
 
     for (int i = 0; i < n_tones; i++) {
 
@@ -373,7 +373,7 @@ int ftx_substract(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate, u
         // Get the pointer to symbol 'block' of the candidate
         WF_ELEM_T* wf_el = (WF_ELEM_T*)mag_cand + (i * wf->block_stride);
 
-        wf_el[tones[i]] -= snr;
+        SUB_WF_ELEM_MAG(wf_el[tones[i]], snr);
     }
 }
 

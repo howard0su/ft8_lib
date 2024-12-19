@@ -24,10 +24,12 @@ typedef struct
 #define WF_ELEM_T          waterfall_cpx_t
 #define WF_ELEM_MAG(x)     ((x).mag)
 #define WF_ELEM_MAG_INT(x) (int)(2 * ((x).mag + 120.0f))
+#define SUB_WF_ELEM_MAG(x, y) do {(x).mag -= y; } while(0)
 #else
 #define WF_ELEM_T          uint8_t
 #define WF_ELEM_MAG(x)     ((float)(x)*0.5f - 120.0f)
 #define WF_ELEM_MAG_INT(x) (int)(x)
+#define SUB_WF_ELEM_MAG(x, y) do {(x) -= y * 2 + 240; } while(0)
 #endif
 
 /// Input structure to ftx_find_sync() function. This structure describes stored waterfall data over the whole message slot.

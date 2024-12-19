@@ -21,6 +21,21 @@ The decoder is designed with memory and computing efficiency in mind, in order t
 |Lower canidate threshold to 5|23 (1.5%)|402 (26.6%)|73.4%|97.0%|83.6%
 |Increase canidate number to 256|27 (1.8%)|391 (25.8%)|74.2%|96.5%|83.9%
 |Modify substraction algorithm|24 (1.6%)|390 (25.8%)|74.2%|96.9%|84.1%
+|Use float when computing snr|28 (1.8%)|386 (25.5%)|74.5%|96.4%|84.0%
+
+*** Assume all extra is fake spots to caculate F1 score, which is not necessary true. ***
+
+>*Precision* avoids false positives
+>
+>Out of all the FT8 signals the decoder identified as valid decodes, how many were actually correct? (Measures how accurate decoding are.)
+
+> *Recall* avoids false negatives
+>
+>Out of all the FT8 signals that were actually present, how many did the decoder successfully decode? (Measures how good decoder is at catching all signals.)
+
+>*F1-Score*  balances above two metrics.
+>
+>A balance between precision and recall. It’s a single number that tells you how well the decoder performs overall in identifying FT8 signals.
 
 # Current state
 
