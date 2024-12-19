@@ -8,6 +8,8 @@ The encoding process is relatively light on resources, and an Arduino should be 
 
 The decoder is designed with memory and computing efficiency in mind, in order to be usable with a fast enough microcontroller. It is shown to be working on STM32F7 boards fast enough for real work, but the embedded application itself is beyond this repository. This repository provides an example decoder which can decode a 15-second WAV file on a desktop machine or SBC. The decoder needs to access the whole 15-second window in spectral magnitude representation (the window can be also shorter, and messages can have varying starting time within the window). The example FT8 decoder can work with slightly less than 200 KB of RAM. 
 
+**Above Statement is not true for this fork. The fork is focus on running this lib on a resonable microcontroller with Linux. The memory consumption is far more than 200KB and CPU usage is way more than the original version. I can run this version of decoder for 11 channels on Zynq7010 with 2 ARM cores.**
+
 # Improvement over the original lib
 
 |Change|Extra|Missed|Recall|Precision|F1 Score|
@@ -19,10 +21,11 @@ The decoder is designed with memory and computing efficiency in mind, in order t
 |substract encoded messages|20 (1.3%)|415 (27.4%)|72.6%|97.4%|83.2%
 |two passes decode|24 (1.6%)|403 (26.6%)|73.4%|96.9%|83.5%
 |Lower canidate threshold to 5|23 (1.5%)|402 (26.6%)|73.4%|97.0%|83.6%
-|Increase canidate number to 256|27 (1.8%)|391 (25.8%)|74.2%|96.5%|83.9%
+|Increase # of canidate to 256|27 (1.8%)|391 (25.8%)|74.2%|96.5%|83.9%
 |Modify substraction algorithm|24 (1.6%)|390 (25.8%)|74.2%|96.9%|84.1%
 |Use float when computing snr|28 (1.8%)|386 (25.5%)|74.5%|96.4%|84.0%
 |Substract in each freq_sub|34 (2.2%)|371 (24.5%)|75.5%|95.6%|84.4%
+|three passes while reduce # of canidates per pass|31 (2.0%)|370 (24.4%)|75.6%|96.0%|84.6%
 
 *** Assume all extra is fake spots to caculate F1 score, which is not necessary true. ***
 

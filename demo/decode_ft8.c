@@ -143,8 +143,8 @@ void decode(const monitor_t* mon, struct tm* tm_slot_start)
         decoded_hashtable[i] = NULL;
     }
 
-    for (int pass = 0; pass < 2; pass++) {
-    int num_candidates = ftx_find_candidates(wf, kMax_candidates, candidate_list, kMin_score);
+    for (int pass = 0; pass < 3; pass++) {
+    int num_candidates = ftx_find_candidates(wf, kMax_candidates / (pass + 1), candidate_list, kMin_score);
 
     // Go over candidates and attempt to decode messages
     for (int idx = 0; idx < num_candidates; ++idx)
