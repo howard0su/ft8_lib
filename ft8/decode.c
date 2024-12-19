@@ -326,54 +326,78 @@ static void ftx_normalize_logl(float* log174)
     }
 }
 
-int ftx_substract(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate, uint8_t *tones, uint8_t n_tones) {
-    float noise = 0;
-    float signal = 0;
-    int num_average = 0;
+/**
+ * @brief Subtract the estimated noise from the signal, given a candidate and a sequence of tones
+ *
+ * This function takes a candidate and a sequence of tones, and subtracts the estimated noise from the signal.
+ * The noise is estimated as the minimum signal power of all tones except the one of the candidate.
+ * The signal power is then subtracted from the signal.
+ *
+ * @param wf Waterfall data
+ * @param candidate Candidate to subtract
+ * @param tones Sequence of tones
+ * @param n_tones Length of sequence of tones
+ */
+int ftx_substract(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate, uint8_t* tones, uint8_t n_tones)
+{
     int n_items = (wf->protocol == FTX_PROTOCOL_FT8) ? 8 : 4;
 
-    const WF_ELEM_T* mag_cand = get_cand_mag(wf, candidate);
-    for (int i = 0; i < n_tones; i++) {
+    ftx_candidate_t can = *candidate;
 
-        int block_abs = candidate->time_offset + i; // relative to the captured signal
-        // Check for time boundaries
-        if (block_abs < 0)
-            continue;
-        if (block_abs >= wf->num_blocks)
-            break;
+    for (int freq_sub = 0; freq_sub < wf->freq_osr; freq_sub++)
+    {
+        can.freq_sub = freq_sub;
 
-        // Get the pointer to symbol 'block' of the candidate
-        const WF_ELEM_T* wf_el = mag_cand + (i * wf->block_stride);
+        const WF_ELEM_T* mag_cand = get_cand_mag(wf, &can);
+        float noise = 0;
+        float signal = 0;
+        int num_average = 0;
 
-        float noise_val = 100000.0;
-        for (int s = 0; s < n_items; s++) {
-            if (s == tones[i])
+        for (int i = 0; i < n_tones; i++)
+        {
+
+            int block_abs = candidate->time_offset + i; // relative to the captured signal
+            // Check for time boundaries
+            if (block_abs < 0)
                 continue;
-            if (WF_ELEM_MAG(wf_el[s]) < noise_val)
-                noise_val = WF_ELEM_MAG(wf_el[s]);
+            if (block_abs >= wf->num_blocks)
+                break;
+
+            // Get the pointer to symbol 'block' of the candidate
+            const WF_ELEM_T* wf_el = mag_cand + (i * wf->block_stride);
+
+            float noise_val = 100000.0;
+            for (int s = 0; s < n_items; s++)
+            {
+                if (s == tones[i])
+                    continue;
+                if (WF_ELEM_MAG(wf_el[s]) < noise_val)
+                    noise_val = WF_ELEM_MAG(wf_el[s]);
+            }
+            noise += noise_val;
+            signal += WF_ELEM_MAG(wf_el[tones[i]]);
+            num_average++;
         }
-        noise += noise_val;
-        signal += WF_ELEM_MAG(wf_el[tones[i]]);
-        num_average++;
-    }
 
-    noise /= num_average;
-    signal /= num_average;
-    float snr = signal - noise;
+        noise /= num_average;
+        signal /= num_average;
+        float snr = signal - noise;
 
-    for (int i = 0; i < n_tones; i++) {
+        for (int i = 0; i < n_tones; i++)
+        {
 
-        int block_abs = candidate->time_offset + i; // relative to the captured signal
-        // Check for time boundaries
-        if (block_abs < 0)
-            continue;
-        if (block_abs >= wf->num_blocks)
-            break;
+            int block_abs = candidate->time_offset + i; // relative to the captured signal
+            // Check for time boundaries
+            if (block_abs < 0)
+                continue;
+            if (block_abs >= wf->num_blocks)
+                break;
 
-        // Get the pointer to symbol 'block' of the candidate
-        WF_ELEM_T* wf_el = (WF_ELEM_T*)mag_cand + (i * wf->block_stride);
+            // Get the pointer to symbol 'block' of the candidate
+            WF_ELEM_T* wf_el = (WF_ELEM_T*)mag_cand + (i * wf->block_stride);
 
-        SUB_WF_ELEM_MAG(wf_el[tones[i]], snr);
+            SUB_WF_ELEM_MAG(wf_el[tones[i]], snr);
+        }
     }
 }
 

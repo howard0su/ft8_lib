@@ -22,6 +22,7 @@ The decoder is designed with memory and computing efficiency in mind, in order t
 |Increase canidate number to 256|27 (1.8%)|391 (25.8%)|74.2%|96.5%|83.9%
 |Modify substraction algorithm|24 (1.6%)|390 (25.8%)|74.2%|96.9%|84.1%
 |Use float when computing snr|28 (1.8%)|386 (25.5%)|74.5%|96.4%|84.0%
+|Substract in each freq_sub|34 (2.2%)|371 (24.5%)|75.5%|95.6%|84.4%
 
 *** Assume all extra is fake spots to caculate F1 score, which is not necessary true. ***
 
