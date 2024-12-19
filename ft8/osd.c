@@ -180,7 +180,11 @@ matmul(uint8_t a[FTX_LDPC_K][FTX_LDPC_K], uint8_t b[FTX_LDPC_K], uint8_t c[FTX_L
  *
  * @return A negative value if 'a' is greater than 'b', zero if equal, and a positive value if 'a' is less than 'b'.
  */
+#ifdef __APPLE__
+static int osd_cmp(void *c, const void* a, const void* b)
+#else
 static int osd_cmp(const void* a, const void* b, void* c)
+#endif
 {
     float* codeword = (float*)c;
     uint8_t aa = *(uint8_t*)a;
@@ -221,8 +225,11 @@ int osd_decode(float codeword[FTX_LDPC_N], int depth, uint8_t out[FTX_LDPC_K], i
     for (int i = 0; i < FTX_LDPC_N; i++)
         which[i] = i;
 
+#ifdef __APPLE__
+    qsort_r(which, FTX_LDPC_N, sizeof(uint8_t), codeword, osd_cmp);
+#else
     qsort_r(which, FTX_LDPC_N, sizeof(uint8_t), osd_cmp, codeword);
-
+#endif
     // gen_sys[174 rows][91 cols] has a row per each of the 174 codeword bits,
     // indicating how to generate it by xor with each of the 91 plain bits.
 
