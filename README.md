@@ -19,6 +19,7 @@ The decoder is designed with memory and computing efficiency in mind, in order t
 |substract encoded messages|20 (1.3%)|415 (27.4%)|72.6%|97.4%|83.2%
 |two passes decode|24 (1.6%)|403 (26.6%)|73.4%|96.9%|83.5%
 |Lower canidate threshold to 5|23 (1.5%)|402 (26.6%)|73.4%|97.0%|83.6%
+|Increase canidate number to 256|27 (1.8%)|391 (25.8%)|74.2%|96.5%|83.9%
 
 # Current state
 
