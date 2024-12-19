@@ -208,17 +208,18 @@ void decode(const monitor_t* mon, struct tm* tm_slot_start)
 
         if (found_empty_slot)
         {
-            // Fill the empty hashtable slot
-            memcpy(&decoded[idx_hash], &message, sizeof(message));
-            decoded_hashtable[idx_hash] = &decoded[idx_hash];
-            ++num_decoded;
-
             char text[FTX_MAX_MESSAGE_LENGTH];
             ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
             if (unpack_status != FTX_MESSAGE_RC_OK)
             {
                 snprintf(text, sizeof(text), "Error [%d] while unpacking!", (int)unpack_status);
+                continue;
             }
+
+            // Fill the empty hashtable slot
+            memcpy(&decoded[idx_hash], &message, sizeof(message));
+            decoded_hashtable[idx_hash] = &decoded[idx_hash];
+            ++num_decoded;
 
             // Fake WSJT-X-like output for now
             float snr = cand->score * 0.5f; // TODO: compute better approximation of SNR

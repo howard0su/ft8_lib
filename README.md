@@ -26,6 +26,7 @@ The decoder is designed with memory and computing efficiency in mind, in order t
 |Use float when computing snr|28 (1.8%)|386 (25.5%)|74.5%|96.4%|84.0%
 |Substract in each freq_sub|34 (2.2%)|371 (24.5%)|75.5%|95.6%|84.4%
 |three passes while reduce # of canidates per pass|31 (2.0%)|370 (24.4%)|75.6%|96.0%|84.6%
+|Filter out fake signal via message formating check|27 (1.8%)|370 (24.4%)|75.6%|96.5%|84.8%
 
 *** Assume all extra is fake spots to caculate F1 score, which is not necessary true. ***
 
