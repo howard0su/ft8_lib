@@ -175,7 +175,7 @@ void decode(const monitor_t* mon, struct tm* tm_slot_start)
             {
                 LOG(LOG_DEBUG, "LDPC decode: %d errors\n", status.ldpc_errors);
             }
-            else if (status.crc_calculated != status.crc_extracted)
+            else if (!status.crc_valid)
             {
                 LOG(LOG_DEBUG, "CRC mismatch!\n");
             }

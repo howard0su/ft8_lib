@@ -67,9 +67,8 @@ typedef struct
     float freq;
     float time;
     int ldpc_errors;         ///< Number of LDPC errors during decoding
-    uint16_t crc_extracted;  ///< CRC value recovered from the message
-    uint16_t crc_calculated; ///< CRC value calculated over the payload
-    // int unpack_status;       ///< Return value of the unpack routine
+    uint8_t crc_valid;       ///< CRC value recovered from the message
+    // int unpack_status;    ///< Return value of the unpack routine
 } ftx_decode_status_t;
 
 /// Localize top N candidates in frequency and time according to their sync strength (looking at Costas symbols)

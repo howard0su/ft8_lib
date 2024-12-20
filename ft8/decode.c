@@ -441,24 +441,18 @@ bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand
         }
     }
 
-    // Extract payload + CRC (first FTX_LDPC_K bits) packed into a byte array
-    uint8_t a91[FTX_LDPC_K_BYTES];
-    pack_bits(plain174, FTX_LDPC_K, a91);
-
-    // Extract CRC and check it
-    status->crc_extracted = ftx_extract_crc(a91);
-    // [1]: 'The CRC is calculated on the source-encoded message, zero-extended from 77 to 82 bits.'
-    a91[9] &= 0xF8;
-    a91[10] &= 0x00;
-    status->crc_calculated = ftx_compute_crc(a91, 96 - 14);
-
-    if (status->crc_extracted != status->crc_calculated)
+    status->crc_valid = ftx_check_crc(plain174);
+    if (!status->crc_valid)
     {
         return false;
     }
 
+    // Extract payload + CRC (first FTX_LDPC_K bits) packed into a byte array
+    uint8_t a91[FTX_LDPC_K_BYTES];
+    pack_bits(plain174, FTX_LDPC_K, a91);
+
     // Reuse CRC value as a hash for the message (TODO: 14 bits only, should perhaps use full 16 or 32 bits?)
-    message->hash = status->crc_calculated;
+    message->hash = ftx_extract_crc(a91);
 
     if (wf->protocol == FTX_PROTOCOL_FT4)
     {
@@ -483,7 +477,7 @@ bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand
         message->snr = ftx_substract(wf, cand, tones, FT8_NN);
     }
 
-    // LOG(LOG_DEBUG, "Decoded message (CRC %04x), trying to unpack...\n", status->crc_extracted);
+    // LOG(LOG_DEBUG, "Decoded message, trying to unpack...\n");
     return true;
 }
 
