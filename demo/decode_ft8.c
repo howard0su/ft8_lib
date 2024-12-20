@@ -221,11 +221,9 @@ void decode(const monitor_t* mon, struct tm* tm_slot_start)
             decoded_hashtable[idx_hash] = &decoded[idx_hash];
             ++num_decoded;
 
-            // Fake WSJT-X-like output for now
-            float snr = cand->score * 0.5f; // TODO: compute better approximation of SNR
             printf("%02d%02d%02d %+05.1f %+4.2f %4.0f ~  %s\n",
                 tm_slot_start->tm_hour, tm_slot_start->tm_min, tm_slot_start->tm_sec,
-                snr, time_sec, freq_hz, text);
+                message.snr / 2 - 22, time_sec, freq_hz, text);
         }
     }
     }

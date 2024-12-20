@@ -8,8 +8,8 @@
 #include <stdbool.h>
 #include <math.h>
 
-// #define LOG_LEVEL LOG_DEBUG
-// #include "debug.h"
+//#define LOG_LEVEL LOG_DEBUG
+#include "debug.h"
 
 // Lookup table for y = 10*log10(1 + 10^(x/10)), where
 //   y - increase in signal level dB when adding a weaker independent signal
@@ -338,11 +338,12 @@ static void ftx_normalize_logl(float* log174)
  * @param tones Sequence of tones
  * @param n_tones Length of sequence of tones
  */
-int ftx_substract(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate, uint8_t* tones, uint8_t n_tones)
+float ftx_substract(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate, uint8_t* tones, uint8_t n_tones)
 {
     int n_items = (wf->protocol == FTX_PROTOCOL_FT8) ? 8 : 4;
 
     ftx_candidate_t can = *candidate;
+    float snr_all = 0;
 
     for (int freq_sub = 0; freq_sub < wf->freq_osr; freq_sub++)
     {
@@ -398,7 +399,12 @@ int ftx_substract(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate, u
 
             SUB_WF_ELEM_MAG(wf_el[tones[i]], snr);
         }
+
+        snr_all += snr;
+        LOG(LOG_INFO, "Freq: %d Noise: %f, Signal: %f, SNR: %f score: %d\n", candidate->freq_offset, noise, signal, snr, candidate->score);
     }
+
+    return snr_all / wf->freq_osr;
 }
 
 bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand, int max_iterations, ftx_message_t* message, ftx_decode_status_t* status)
@@ -464,7 +470,7 @@ bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand
         }
         uint8_t tones[FT4_NN];
         ft4_encode(message->payload, tones);
-        ftx_substract(wf, cand, tones, FT4_NN);
+        message->snr = ftx_substract(wf, cand, tones, FT4_NN);
     }
     else
     {
@@ -474,7 +480,7 @@ bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand
         }
         uint8_t tones[FT8_NN];
         ft8_encode(message->payload, tones);
-        ftx_substract(wf, cand, tones, FT8_NN);
+        message->snr = ftx_substract(wf, cand, tones, FT8_NN);
     }
 
     // LOG(LOG_DEBUG, "Decoded message (CRC %04x), trying to unpack...\n", status->crc_extracted);

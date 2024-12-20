@@ -91,6 +91,14 @@ int ftx_find_candidates(const ftx_waterfall_t* power, int num_candidates, ftx_ca
 /// @return True if the decoding was successful, false otherwise (check status for details)
 bool ftx_decode_candidate(const ftx_waterfall_t* power, const ftx_candidate_t* cand, int max_iterations, ftx_message_t* message, ftx_decode_status_t* status);
 
+/// @brief Substract the estimated noise from the signal, given a candidate and a sequence of tones
+/// @param wf waterfall data
+/// @param candidate Candidate to substract
+/// @param tones The message payload
+/// @param n_tones the payload length
+/// @return 
+float ftx_substract(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate, uint8_t* tones, uint8_t n_tones);
+
 #ifdef __cplusplus
 }
 #endif
