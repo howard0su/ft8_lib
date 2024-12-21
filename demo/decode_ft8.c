@@ -238,6 +238,7 @@ int main(int argc, char** argv)
     const char* dev_name = NULL;
     ftx_protocol_t protocol = FTX_PROTOCOL_FT8;
     float time_shift = 0.8;
+    int stress = 0;
 
     // Parse arguments one by one
     int arg_idx = 1;
@@ -250,6 +251,10 @@ int main(int argc, char** argv)
             if (0 == strcmp(argv[arg_idx], "-ft4"))
             {
                 protocol = FTX_PROTOCOL_FT4;
+            }
+            else if (0 == strcmp(argv[arg_idx], "-stress"))
+            {
+                stress = 10;
             }
             else if (0 == strcmp(argv[arg_idx], "-list"))
             {
@@ -385,7 +390,7 @@ int main(int argc, char** argv)
 
         // Reset internal variables for the next time slot
         monitor_reset(&mon);
-    } while (is_live);
+    } while (is_live || stress--);
 
     monitor_free(&mon);
 
