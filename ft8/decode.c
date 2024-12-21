@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <math.h>
 
-#define LOG_LEVEL LOG_DEBUG
+//#define LOG_LEVEL LOG_DEBUG
 #include "debug.h"
 
 #define kMaxLDPCErrors 32
