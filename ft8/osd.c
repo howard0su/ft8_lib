@@ -83,7 +83,7 @@ int gauss_jordan(int rows, int cols, uint8_t m[FTX_LDPC_N][2 * FTX_LDPC_K], uint
  * @return A score, where higher means better match.
  */
 static float
-osd_score(uint8_t xplain[FTX_LDPC_K], float ll174[FTX_LDPC_N])
+osd_score(const uint8_t xplain[FTX_LDPC_K], const float ll174[FTX_LDPC_N])
 {
     uint8_t xcode[FTX_LDPC_N];
     ldpc_encode(xplain, xcode);
@@ -103,7 +103,7 @@ osd_score(uint8_t xplain[FTX_LDPC_K], float ll174[FTX_LDPC_N])
         }
     }
 
-    return score * 4.6f;
+    return score;
 }
 
 /**
@@ -208,7 +208,7 @@ static int osd_cmp(const void* a, const void* b, void* c)
  */
 int osd_decode(const float codeword[FTX_LDPC_N], int depth, uint8_t out[FTX_LDPC_K], int* out_depth)
 {
-    const int osd_thresh = -500;
+    const float osd_thresh = -100.0f;
 
     // sort, strongest first; we'll use strongest 91.
     uint8_t which[FTX_LDPC_N];
