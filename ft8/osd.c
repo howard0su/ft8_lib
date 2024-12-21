@@ -23,10 +23,10 @@
  * Returns 1 if the matrix is successfully inverted, or 0 if it is singular.
  */
 
-int gauss_jordan(int rows, int cols, uint8_t m[FTX_LDPC_N][2 * FTX_LDPC_K], uint8_t which[FTX_LDPC_K])
+int gauss_jordan(uint8_t m[FTX_LDPC_N][2 * FTX_LDPC_K], uint8_t which[FTX_LDPC_K])
 {
-    assert(rows == FTX_LDPC_K);
-    assert(cols == FTX_LDPC_N);
+    const int rows = FTX_LDPC_K; 
+    const int cols = FTX_LDPC_N;
 
     for (int row = 0; row < rows; row++)
     {
@@ -39,11 +39,12 @@ int gauss_jordan(int rows, int cols, uint8_t m[FTX_LDPC_N][2 * FTX_LDPC_K], uint
                     // swap m[row] and m[row1]
                     for (int col = 0; col < 2 * rows; col++)
                     {
-                        int tmp = m[row][col];
+                        uint8_t temp = m[row][col];
                         m[row][col] = m[row1][col];
-                        m[row1][col] = tmp;
+                        m[row1][col] = temp;
                     }
-                    int tmp = which[row];
+
+                    uint8_t tmp = which[row];
                     which[row] = which[row1];
                     which[row1] = tmp;
                     break;
@@ -56,7 +57,7 @@ int gauss_jordan(int rows, int cols, uint8_t m[FTX_LDPC_N][2 * FTX_LDPC_K], uint
             return 0;
         }
         // lazy creation of identity matrix in the upper-right quarter
-        m[row][rows + row] = (m[row][rows + row] + 1) % 2;
+        m[row][rows + row] ^= 1;
         // now eliminate
         for (int row1 = 0; row1 < cols; row1++)
         {
@@ -67,7 +68,7 @@ int gauss_jordan(int rows, int cols, uint8_t m[FTX_LDPC_N][2 * FTX_LDPC_K], uint
 
             for (int col = 0; col < 2 * rows; col++)
             {
-                m[row1][col] = (m[row1][col] + m[row][col]) % 2;
+                m[row1][col] ^= m[row][col];
             }
         }
     }
@@ -243,7 +244,7 @@ int osd_decode(const float codeword[FTX_LDPC_N], int depth, uint8_t out[FTX_LDPC
         }
     }
 
-    if (gauss_jordan(FTX_LDPC_K, FTX_LDPC_N, b, which) == 0)
+    if (gauss_jordan(b, which) == 0)
     {
         return 0;
     }
