@@ -41,7 +41,7 @@ static float fast_atanh(float x);
  *
  * @return ok number of LDPC errors in the decoded message
  */
-void ldpc_decode(float codeword[], int max_iters, uint8_t plain[], int* ok)
+void ldpc_decode(const float codeword[], int max_iters, uint8_t plain[], int* ok)
 {
     float m[FTX_LDPC_M][FTX_LDPC_N]; // ~60 kB
     float e[FTX_LDPC_M][FTX_LDPC_N]; // ~60 kB
@@ -163,7 +163,7 @@ static int ldpc_check(uint8_t codeword[])
  *
  * @return ok number of LDPC errors in the decoded message
  */
-void bp_decode(float codeword[], int max_iters, uint8_t plain[], int* ok)
+void bp_decode(const float codeword[], int max_iters, uint8_t plain[], int* ok)
 {
     float tov[FTX_LDPC_N][3];
     float toc[FTX_LDPC_M][7];
@@ -259,7 +259,7 @@ void bp_decode(float codeword[], int max_iters, uint8_t plain[], int* ok)
  * @param[in] plain An array of 91 bits representing the plain-text message.
  * @param[out] codeword An array of 174 bits representing the encoded LDPC codeword.
  */
-void ldpc_encode(uint8_t plain[FTX_LDPC_K], uint8_t codeword[FTX_LDPC_N])
+void ldpc_encode(const uint8_t plain[FTX_LDPC_K], uint8_t codeword[FTX_LDPC_N])
 {
     // plain is 91 bits of plain-text.
     // returns a 174-bit codeword.

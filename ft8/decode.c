@@ -8,8 +8,10 @@
 #include <stdbool.h>
 #include <math.h>
 
-//#define LOG_LEVEL LOG_DEBUG
+#define LOG_LEVEL LOG_DEBUG
 #include "debug.h"
+
+#define kMaxLDPCErrors 32
 
 // Lookup table for y = 10*log10(1 + 10^(x/10)), where
 //   y - increase in signal level dB when adding a weaker independent signal
@@ -410,6 +412,9 @@ float ftx_substract(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate,
 bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand, int max_iterations, ftx_message_t* message, ftx_decode_status_t* status)
 {
     float log174[FTX_LDPC_N]; // message bits encoded as likelihood
+
+    LOG(LOG_INFO, "Freq: %d score: %d\n", cand->freq_offset, cand->score);
+
     if (wf->protocol == FTX_PROTOCOL_FT4)
     {
         ft4_extract_likelihood(wf, cand, log174);
@@ -427,7 +432,7 @@ bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand
 
     if (status->ldpc_errors > 0)
     {
-        if (status->ldpc_errors <= 25)
+        if (status->ldpc_errors <= kMaxLDPCErrors)
         {
             int got_depth = -1;
             if (!osd_decode(log174, 6, plain174, &got_depth))

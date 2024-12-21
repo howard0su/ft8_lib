@@ -94,16 +94,16 @@ osd_score(uint8_t xplain[FTX_LDPC_K], float ll174[FTX_LDPC_N])
         if (xcode[i])
         {
             // one-bit, expect ll to be negative.
-            score -= ll174[i] * 4.6f;
+            score -= ll174[i];
         }
         else
         {
             // zero-bit, expect ll to be positive.
-            score += ll174[i] * 4.6f;
+            score += ll174[i];
         }
     }
 
-    return score;
+    return score * 4.6f;
 }
 
 /**
@@ -119,29 +119,19 @@ osd_score(uint8_t xplain[FTX_LDPC_K], float ll174[FTX_LDPC_N])
  *         otherwise returns 0.
  */
 
-static int
+static bool
 osd_check(const uint8_t plain[FTX_LDPC_K])
 {
-    // does a decode look plausible?
-    int allzero = 1;
     for (int i = 0; i < FTX_LDPC_K; i++)
     {
         if (plain[i] != 0)
         {
-            allzero = 0;
+            return ftx_check_crc(plain);
         }
     }
-    if (allzero)
-    {
-        return 0;
-    }
 
-    if (ftx_check_crc(plain) == 0)
-    {
-        return 0;
-    }
-
-    return 1;
+    // all zeros
+    return false;
 }
 
 /**
@@ -155,16 +145,16 @@ osd_check(const uint8_t plain[FTX_LDPC_K])
  * @param[out] c A 1D array representing the resulting vector after matrix multiplication and modulo operation.
  */
 static void
-matmul(uint8_t a[FTX_LDPC_K][FTX_LDPC_K], uint8_t b[FTX_LDPC_K], uint8_t c[FTX_LDPC_K])
+matmul(const uint8_t a[FTX_LDPC_K][FTX_LDPC_K], const uint8_t b[FTX_LDPC_K], uint8_t c[FTX_LDPC_K])
 {
     for (int i = 0; i < FTX_LDPC_K; i++)
     {
         int sum = 0;
         for (int j = 0; j < FTX_LDPC_K; j++)
         {
-            sum += a[i][j] & b[j]; // one bit multiply
+            sum ^= a[i][j] & b[j]; // one bit multiply
         }
-        c[i] = sum % 2;
+        c[i] = sum;
     }
 }
 
@@ -216,7 +206,7 @@ static int osd_cmp(const void* a, const void* b, void* c)
  *
  * @return Returns 1 if the decode was successful, 0 otherwise.
  */
-int osd_decode(float codeword[FTX_LDPC_N], int depth, uint8_t out[FTX_LDPC_K], int* out_depth)
+int osd_decode(const float codeword[FTX_LDPC_N], int depth, uint8_t out[FTX_LDPC_K], int* out_depth)
 {
     const int osd_thresh = -500;
 
@@ -241,7 +231,7 @@ int osd_decode(float codeword[FTX_LDPC_N], int depth, uint8_t out[FTX_LDPC_K], i
         uint8_t ii = which[i];
         if (ii < FTX_LDPC_K)
         {
-                b[i][ii] = 1;
+            b[i][ii] = 1;
         }
         else
         {
@@ -282,7 +272,7 @@ int osd_decode(float codeword[FTX_LDPC_N], int depth, uint8_t out[FTX_LDPC_K], i
     matmul(gen1_inv, y1, xplain); // also does mod 2
 
     float xscore = osd_score(xplain, codeword);
-    int ch = osd_check(xplain);
+    bool ch = osd_check(xplain);
     if (xscore < osd_thresh && ch)
     {
         // just accept this, since no bits had to be flipped.
@@ -304,7 +294,7 @@ int osd_decode(float codeword[FTX_LDPC_N], int depth, uint8_t out[FTX_LDPC_K], i
         matmul(gen1_inv, y1, xplain);
         y1[i] ^= 1;
         float xscore = osd_score(xplain, codeword);
-        int ch = osd_check(xplain);
+        bool ch = osd_check(xplain);
         if (xscore < osd_thresh && ch)
         {
             if (got_a_best == 0 || xscore < best_score)

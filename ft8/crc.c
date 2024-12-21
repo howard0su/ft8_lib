@@ -62,7 +62,7 @@ void ftx_add_crc(const uint8_t payload[], uint8_t a91[])
     a91[11] = (uint8_t)(checksum << 5);
 }
 
-void ftx_crc(uint8_t msg1[], int msglen, uint8_t out[14])
+void ftx_crc(const uint8_t msg1[], int msglen, uint8_t out[14])
 {
     // the old FT8 polynomial for 12-bit CRC, 0xc06.
     // int div[] = { 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0 };
@@ -102,7 +102,7 @@ void ftx_crc(uint8_t msg1[], int msglen, uint8_t out[14])
     }
 }
 
-int
+bool
 ftx_check_crc(const uint8_t a91[FTX_LDPC_K])
 {
     uint8_t out1[14];
@@ -114,8 +114,8 @@ ftx_check_crc(const uint8_t a91[FTX_LDPC_K])
     {
         if (out1[i] != a91[FTX_LDPC_K - FTX_CRC_WIDTH + i])
         {
-            return 0;
+            return false;
         }
     }
-    return 1;
+    return true;
 }
