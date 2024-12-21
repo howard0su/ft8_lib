@@ -486,12 +486,12 @@ bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand
     return true;
 }
 
-static float max2(float a, float b)
+static inline float max2(float a, float b)
 {
     return (a >= b) ? a : b;
 }
 
-static float max4(float a, float b, float c, float d)
+static inline float max4(float a, float b, float c, float d)
 {
     return max2(max2(a, b), max2(c, d));
 }
