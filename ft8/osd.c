@@ -217,9 +217,9 @@ int osd_decode(const float codeword[FTX_LDPC_N], int depth, uint8_t out[FTX_LDPC
         which[i] = i;
 
 #ifdef __APPLE__
-    qsort_r(which, FTX_LDPC_N, sizeof(uint8_t), codeword, osd_cmp);
+    qsort_r(which, FTX_LDPC_N, sizeof(uint8_t), (void*)codeword, osd_cmp);
 #else
-    qsort_r(which, FTX_LDPC_N, sizeof(uint8_t), osd_cmp, codeword);
+    qsort_r(which, FTX_LDPC_N, sizeof(uint8_t), osd_cmp, (void*)codeword);
 #endif
     // gen_sys[174 rows][91 cols] has a row per each of the 174 codeword bits,
     // indicating how to generate it by xor with each of the 91 plain bits.

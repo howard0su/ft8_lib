@@ -11,8 +11,7 @@ FFT_OBJ  = $(patsubst %.c,$(BUILD_DIR)/%.o,$(FFT_SRC))
 
 TARGETS  = gen_ft8 decode_ft8 test_ft8
 
-CFLAGS   = -std=gnu99 -fsanitize=address -O3 -ggdb3
-CPPFLAGS = -std=gnu11 -I.
+CPPFLAGS = -std=c++11 -I. -O3 -ggdb3 -D_GNU_SOURCE
 LDFLAGS  = -fsanitize=address -lm
 
 # Optionally, use Portaudio for live audio input
@@ -41,21 +40,21 @@ install:
 	install libft8.a /usr/lib/libft8.a
 
 gen_ft8: $(BUILD_DIR)/demo/gen_ft8.o $(FT8_OBJ) $(COMMON_OBJ) $(FFT_OBJ)
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(CXX) $(LDFLAGS) -o $@ $^
 
 decode_ft8: $(BUILD_DIR)/demo/decode_ft8.o $(FT8_OBJ) $(COMMON_OBJ) $(FFT_OBJ)
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(CXX) $(LDFLAGS) -o $@ $^
 
 test_ft8: $(BUILD_DIR)/test/test.o $(FT8_OBJ)
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(CXX) $(LDFLAGS) -o $@ $^
 
 bench: $(BENCH_DIR)/test/bench.o $(BENCH_FT8_OBJ)
-	$(CC) $(BENCH_LDFLAGS) -o $@ $^
+	$(CXX) $(BENCH_LDFLAGS) -o $@ $^
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ -c $^
+	$(CXX) $(CPPFLAGS) -o $@ -c $^
 
 $(BENCH_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(BENCH_CFLAGS) $(CPPFLAGS) -o $@ -c $^
+	$(CXX) $(BENCH_CFLAGS) $(CPPFLAGS) -o $@ -c $^
