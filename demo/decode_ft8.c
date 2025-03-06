@@ -146,6 +146,9 @@ void decode(const monitor_t* mon, struct tm* tm_slot_start)
     }
 
     for (int pass = 0; pass < 3; pass++) {
+    bool freq_decoded[1024];
+    memset(freq_decoded, 0, sizeof(freq_decoded));
+
     int num_candidates = ftx_find_candidates(wf, kMax_candidates / (pass + 1), candidate_list, kMin_score);
 
     // Go over candidates and attempt to decode messages
@@ -155,6 +158,11 @@ void decode(const monitor_t* mon, struct tm* tm_slot_start)
 
         float freq_hz = (mon->min_bin + cand->freq_offset + (float)cand->freq_sub / wf->freq_osr) / mon->symbol_period;
         float time_sec = (cand->time_offset + (float)cand->time_sub / wf->time_osr) * mon->symbol_period;
+
+        if (freq_decoded[(int)freq_hz/4])
+        {
+            continue;
+        }
 
 #ifdef WATERFALL_USE_PHASE
         // int resynth_len = 12000 * 16;
@@ -184,6 +192,8 @@ void decode(const monitor_t* mon, struct tm* tm_slot_start)
             }
             continue;
         }
+
+        freq_decoded[(int)freq_hz/4] = true;
 
         LOG(LOG_DEBUG, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n", time_sec, freq_hz, cand->score);
         int idx_hash = message.hash % kMax_decoded_messages;
