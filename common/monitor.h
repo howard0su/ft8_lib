@@ -9,7 +9,7 @@ extern "C"
 #include <ft8/decode.h>
 #include <fft/kiss_fftr.h>
 
-/// Configuration options for FT4/FT8 monitor
+/// Configuration options for FT4/FT8/FST4/FST4W monitor
 typedef struct
 {
     float f_min;             ///< Lower frequency bound for analysis
@@ -17,7 +17,8 @@ typedef struct
     int sample_rate;         ///< Sample rate in Hertz
     int time_osr;            ///< Number of time subdivisions
     int freq_osr;            ///< Number of frequency subdivisions
-    ftx_protocol_t protocol; ///< Protocol: FT4 or FT8
+    ftx_protocol_t protocol; ///< Protocol: FT4, FT8, FST4, or FST4W
+    float tr_period;         ///< T/R period in seconds (used for FST4/FST4W; ignored for FT4/FT8)
 } monitor_config_t;
 
 /// FT4/FT8 monitor object that manages DSP processing of incoming audio data

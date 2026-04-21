@@ -32,8 +32,11 @@ void usage(const char* error_msg)
     {
         fprintf(stderr, "ERROR: %s\n", error_msg);
     }
-    fprintf(stderr, "Usage: decode_ft8 [-list|([-ft4] [INPUT|-dev DEVICE])]\n\n");
-    fprintf(stderr, "Decode a 15-second (or slighly shorter) WAV file.\n");
+    fprintf(stderr, "Usage: decode_ft8 [-list|([-ft4|-fst4 TR|-fst4w TR] [INPUT|-dev DEVICE])]\n\n");
+    fprintf(stderr, "Decode a WAV file or live audio stream.\n");
+    fprintf(stderr, "  -ft4         Use FT4 protocol\n");
+    fprintf(stderr, "  -fst4 TR     Use FST4 protocol with T/R period (15,30,60,120,300,900,1800)\n");
+    fprintf(stderr, "  -fst4w TR    Use FST4W protocol with T/R period\n");
 }
 
 #define CALLSIGN_HASHTABLE_SIZE 256
@@ -237,6 +240,7 @@ int main(int argc, char** argv)
     const char* wav_path = NULL;
     const char* dev_name = NULL;
     ftx_protocol_t protocol = FTX_PROTOCOL_FT8;
+    float tr_period = 0; // Used for FST4/FST4W
     float time_shift = 0.8;
     int stress = 0;
 
@@ -251,6 +255,34 @@ int main(int argc, char** argv)
             if (0 == strcmp(argv[arg_idx], "-ft4"))
             {
                 protocol = FTX_PROTOCOL_FT4;
+            }
+            else if (0 == strcmp(argv[arg_idx], "-fst4"))
+            {
+                protocol = FTX_PROTOCOL_FST4;
+                if (arg_idx + 1 < argc)
+                {
+                    ++arg_idx;
+                    tr_period = atof(argv[arg_idx]);
+                }
+                else
+                {
+                    usage("Expected T/R period after -fst4");
+                    return -1;
+                }
+            }
+            else if (0 == strcmp(argv[arg_idx], "-fst4w"))
+            {
+                protocol = FTX_PROTOCOL_FST4W;
+                if (arg_idx + 1 < argc)
+                {
+                    ++arg_idx;
+                    tr_period = atof(argv[arg_idx]);
+                }
+                else
+                {
+                    usage("Expected T/R period after -fst4w");
+                    return -1;
+                }
             }
             else if (0 == strcmp(argv[arg_idx], "-stress"))
             {
@@ -302,7 +334,15 @@ int main(int argc, char** argv)
         return -1;
     }
 
-    float slot_period = ((protocol == FTX_PROTOCOL_FT8) ? FT8_SLOT_TIME : FT4_SLOT_TIME);
+    float slot_period;
+    if (protocol == FTX_PROTOCOL_FST4 || protocol == FTX_PROTOCOL_FST4W)
+    {
+        slot_period = tr_period;
+    }
+    else
+    {
+        slot_period = ((protocol == FTX_PROTOCOL_FT8) ? FT8_SLOT_TIME : FT4_SLOT_TIME);
+    }
     int sample_rate = 12000;
     int num_samples = slot_period * sample_rate;
     float signal[num_samples];
@@ -334,7 +374,8 @@ int main(int argc, char** argv)
         .sample_rate = sample_rate,
         .time_osr = kTime_osr,
         .freq_osr = kFreq_osr,
-        .protocol = protocol
+        .protocol = protocol,
+        .tr_period = tr_period
     };
 
     hashtable_init();

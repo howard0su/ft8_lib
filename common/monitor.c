@@ -1,5 +1,6 @@
 #include "monitor.h"
 #include <common/common.h>
+#include <ft8/constants.h>
 
 #define LOG_LEVEL LOG_INFO
 #include <ft8/debug.h>
@@ -54,8 +55,40 @@ static void waterfall_free(ftx_waterfall_t* me)
 
 void monitor_init(monitor_t* me, const monitor_config_t* cfg)
 {
-    float slot_time = (cfg->protocol == FTX_PROTOCOL_FT4) ? FT4_SLOT_TIME : FT8_SLOT_TIME;
-    float symbol_period = (cfg->protocol == FTX_PROTOCOL_FT4) ? FT4_SYMBOL_PERIOD : FT8_SYMBOL_PERIOD;
+    float slot_time;
+    float symbol_period;
+
+    if (cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W)
+    {
+        // Look up NSPS for the given T/R period
+        int tr = (int)cfg->tr_period;
+        int nsps = 0;
+        for (int i = 0; i < FST4_NUM_TR_PERIODS; ++i)
+        {
+            if (kFST4_TR_periods[i] == tr)
+            {
+                nsps = kFST4_NSPS[i];
+                break;
+            }
+        }
+        if (nsps == 0)
+        {
+            // Default to 60s if invalid T/R period
+            nsps = 3888;
+        }
+        symbol_period = (float)nsps / 12000.0f;
+        slot_time = cfg->tr_period;
+    }
+    else if (cfg->protocol == FTX_PROTOCOL_FT4)
+    {
+        slot_time = FT4_SLOT_TIME;
+        symbol_period = FT4_SYMBOL_PERIOD;
+    }
+    else
+    {
+        slot_time = FT8_SLOT_TIME;
+        symbol_period = FT8_SYMBOL_PERIOD;
+    }
     // Compute DSP parameters that depend on the sample rate
     me->block_size = (int)(cfg->sample_rate * symbol_period); // samples corresponding to one FSK symbol
     me->subblock_size = me->block_size / cfg->time_osr;
