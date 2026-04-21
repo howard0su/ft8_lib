@@ -7,6 +7,8 @@
 #include "ft8/text.h"
 #include "ft8/encode.h"
 #include "ft8/constants.h"
+#include "ft8/crc.h"
+#include "ft8/fst4_ldpc.h"
 
 #include "fft/kiss_fftr.h"
 #include "common/common.h"
@@ -228,6 +230,109 @@ void test_msg(const char* call_to_tx, const char* call_de_tx, const char* extra_
 
 #define SIZEOF_ARRAY(x) (sizeof(x) / sizeof((x)[0]))
 
+void test_fst4_ldpc_roundtrip(void)
+{
+    printf("\n=== FST4 (240,101) LDPC Roundtrip ===\n");
+    uint8_t msg101[FST4_LDPC_K_BYTES];
+    memset(msg101, 0, sizeof(msg101));
+    msg101[0] = 0xA5; msg101[1] = 0x3C; msg101[2] = 0xF0;
+    msg101[5] = 0x42; msg101[10] = 0xDE;
+
+    uint8_t codeword[FST4_LDPC_N_BYTES];
+    fst4_ldpc_encode(msg101, codeword);
+
+    float llr[FST4_LDPC_N];
+    for (int i = 0; i < FST4_LDPC_N; ++i)
+    {
+        int bit = (codeword[i / 8] >> (7 - (i % 8))) & 1;
+        llr[i] = bit ? 10.0f : -10.0f;
+    }
+
+    uint8_t decoded[FST4_LDPC_N];
+    int ok;
+    fst4_ldpc_decode(llr, 25, decoded, &ok);
+    printf("Parity errors: %d\n", ok);
+    CHECK(ok == 0);
+
+    for (int i = 0; i < FST4_LDPC_K; ++i)
+    {
+        int expected = (msg101[i / 8] >> (7 - (i % 8))) & 1;
+        CHECK(decoded[i] == expected);
+    }
+    TEST_END;
+}
+
+void test_fst4w_ldpc_roundtrip(void)
+{
+    printf("\n=== FST4W (240,74) LDPC Roundtrip ===\n");
+    uint8_t msg74[FST4W_LDPC_K_BYTES];
+    memset(msg74, 0, sizeof(msg74));
+    msg74[0] = 0xDE; msg74[1] = 0xAD; msg74[3] = 0xBE;
+    msg74[5] = 0xEF; msg74[8] = 0x42;
+
+    uint8_t codeword[FST4_LDPC_N_BYTES];
+    fst4w_ldpc_encode(msg74, codeword);
+
+    float llr[FST4_LDPC_N];
+    for (int i = 0; i < FST4_LDPC_N; ++i)
+    {
+        int bit = (codeword[i / 8] >> (7 - (i % 8))) & 1;
+        llr[i] = bit ? 10.0f : -10.0f;
+    }
+
+    uint8_t decoded[FST4_LDPC_N];
+    int ok;
+    fst4w_ldpc_decode(llr, 25, decoded, &ok);
+    printf("Parity errors: %d\n", ok);
+    CHECK(ok == 0);
+
+    for (int i = 0; i < FST4W_LDPC_K; ++i)
+    {
+        int expected = (msg74[i / 8] >> (7 - (i % 8))) & 1;
+        CHECK(decoded[i] == expected);
+    }
+    TEST_END;
+}
+
+void test_fst4_encode(void)
+{
+    printf("\n=== FST4 Full Encode Test ===\n");
+    ftx_message_t msg;
+    ftx_message_init(&msg);
+    ftx_message_rc_t rc = ftx_message_encode(&msg, NULL, "CQ K1JT FN20");
+    CHECK(rc == FTX_MESSAGE_RC_OK);
+
+    uint8_t tones[FST4_NN];
+    fst4_encode(msg.payload, tones);
+
+    CHECK(tones[0] == kFST4_Sync_word1[0]);
+    CHECK(tones[7] == kFST4_Sync_word1[7]);
+    CHECK(tones[38] == kFST4_Sync_word2[0]);
+    CHECK(tones[45] == kFST4_Sync_word2[7]);
+    CHECK(tones[76] == kFST4_Sync_word1[0]);
+    CHECK(tones[152] == kFST4_Sync_word1[0]);
+
+    for (int i = 0; i < FST4_NN; ++i)
+        CHECK(tones[i] <= 3);
+
+    printf("Frame structure valid\n");
+    TEST_END;
+}
+
+void test_crc24(void)
+{
+    printf("\n=== CRC-24 Tests ===\n");
+    uint8_t payload[10] = { 0xA5, 0x3C, 0xF0, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE };
+    uint8_t a101[FST4_LDPC_K_BYTES];
+    fst4_add_crc(payload, a101);
+    CHECK(fst4_check_crc(a101));
+
+    a101[5] ^= 0x04;
+    CHECK(!fst4_check_crc(a101));
+    printf("CRC-24 add/check OK\n");
+    TEST_END;
+}
+
 int main()
 {
     // test1();
@@ -255,6 +360,12 @@ int main()
     }
 
     // test_std_msg("YOMAMA", "MYMAMA/QRP", "73");
+
+    // FST4 tests
+    test_fst4_ldpc_roundtrip();
+    test_fst4w_ldpc_roundtrip();
+    test_fst4_encode();
+    test_crc24();
 
     return 0;
 }
