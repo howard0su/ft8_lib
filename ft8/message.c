@@ -585,7 +585,7 @@ static bool save_callsign(const ftx_callsign_hash_interface_t* hash_if, const ch
     if (n10_out != NULL)
         *n10_out = n10;
 
-    if (hash_if != NULL)
+    if (hash_if != NULL && hash_if->save_hash != NULL)
         hash_if->save_hash(callsign, n22);
 
     return true;
@@ -596,7 +596,7 @@ static bool lookup_callsign(const ftx_callsign_hash_interface_t* hash_if, ftx_ca
     char c11[12];
 
     bool found;
-    if (hash_if != NULL)
+    if (hash_if != NULL && hash_if->lookup_hash != NULL)
         found = hash_if->lookup_hash(hash_type, hash, c11);
     else
         found = false;
@@ -991,4 +991,147 @@ static int unpackgrid(uint16_t igrid4, uint8_t ir, char* extra)
     }
 
     return 0;
+}
+
+// Extract n bits starting at bit position 'start' from MSB-first packed bytes
+static uint32_t extract_bits(const uint8_t* data, int start, int nbits)
+{
+    uint32_t result = 0;
+    for (int i = start; i < start + nbits; i++)
+    {
+        result <<= 1;
+        result |= (data[i / 8] >> (7 - (i % 8))) & 1;
+    }
+    return result;
+}
+
+ftx_message_rc_t fst4w_message_decode(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* message)
+{
+    const uint8_t* p = msg->payload;
+
+    // Determine WSPR subtype from bits 48-49
+    uint8_t j2a = (p[6] >> 1) & 1; // bit 48
+    uint8_t j2b = p[6] & 1;        // bit 49
+
+    int itype = 2; // default: Type 2 (prefix/suffix)
+    if (j2b == 0 && j2a == 0)
+        itype = 1; // Standard WSPR
+    if (j2b == 0 && j2a == 1)
+        itype = 3; // Hashed call + grid6
+
+    if (itype == 1)
+    {
+        // WSPR Type 1: callsign(28) + grid4(15) + power(5)
+        uint32_t n28 = extract_bits(p, 0, 28);
+        uint16_t igrid4 = (uint16_t)extract_bits(p, 28, 15);
+        uint8_t idbm = (uint8_t)extract_bits(p, 43, 5);
+        int dbm = (int)(idbm * 10.0f / 3.0f + 0.5f);
+
+        char callsign[14];
+        if (unpack28(n28, 0, 0, hash_if, callsign) < 0)
+            return FTX_MESSAGE_RC_ERROR_CALLSIGN1;
+
+        // Decode grid4 from igrid4 (same encoding as FT8 grid)
+        char grid4[5];
+        grid4[3] = '0' + (igrid4 % 10);
+        igrid4 /= 10;
+        grid4[2] = '0' + (igrid4 % 10);
+        igrid4 /= 10;
+        grid4[1] = 'A' + (igrid4 % 18);
+        igrid4 /= 18;
+        grid4[0] = 'A' + (igrid4 % 18);
+        grid4[4] = '\0';
+
+        snprintf(message, FTX_MAX_MESSAGE_LENGTH, "%s %s %d", callsign, grid4, dbm);
+    }
+    else if (itype == 2)
+    {
+        // WSPR Type 2: callsign(28) + prefix/suffix(16) + power(5)
+        uint32_t n28 = extract_bits(p, 0, 28);
+        uint16_t npfx = (uint16_t)extract_bits(p, 28, 16);
+        uint8_t idbm = (uint8_t)extract_bits(p, 44, 5);
+        int dbm = (int)(idbm * 10.0f / 3.0f + 0.5f);
+
+        char callsign[14];
+        if (unpack28(n28, 0, 0, hash_if, callsign) < 0)
+            return FTX_MESSAGE_RC_ERROR_CALLSIGN1;
+
+        // Decode prefix or suffix
+        char pfx[4] = { 0 };
+        const char a2[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        int nzzz = 46656; // 36^3
+
+        if ((int)npfx < nzzz)
+        {
+            // Prefix: decode base-36
+            uint16_t n = npfx;
+            for (int i = 2; i >= 0; i--)
+            {
+                pfx[i] = a2[n % 36];
+                n /= 36;
+                if (n == 0)
+                {
+                    if (i > 0)
+                        memmove(pfx, pfx + i, 4 - i);
+                    break;
+                }
+            }
+            snprintf(message, FTX_MAX_MESSAGE_LENGTH, "%s/%s %d", pfx, callsign, dbm);
+        }
+        else
+        {
+            // Suffix
+            int ns = (int)npfx - nzzz;
+            if (ns <= 35)
+            {
+                pfx[0] = a2[ns];
+                pfx[1] = '\0';
+            }
+            else if (ns <= 1295)
+            {
+                pfx[0] = a2[ns / 36];
+                pfx[1] = a2[ns % 36];
+                pfx[2] = '\0';
+            }
+            else
+            {
+                pfx[0] = a2[ns / 360];
+                pfx[1] = a2[(ns / 10) % 36];
+                pfx[2] = a2[ns % 10];
+                pfx[3] = '\0';
+            }
+            snprintf(message, FTX_MAX_MESSAGE_LENGTH, "%s/%s %d", callsign, pfx, dbm);
+        }
+    }
+    else
+    {
+        // WSPR Type 3: hashed_call(22) + grid6(25)
+        uint32_t n22 = extract_bits(p, 0, 22);
+        uint32_t igrid6 = extract_bits(p, 22, 25);
+
+        // Look up hashed callsign (n28 = n22 + NTOKENS)
+        char callsign[14];
+        uint32_t n28 = n22 + NTOKENS;
+        if (unpack28(n28, 0, 0, hash_if, callsign) < 0)
+            return FTX_MESSAGE_RC_ERROR_CALLSIGN1;
+
+        // Decode 6-character grid
+        char grid6[7];
+        grid6[5] = 'a' + (igrid6 % 24);
+        igrid6 /= 24;
+        grid6[4] = 'a' + (igrid6 % 24);
+        igrid6 /= 24;
+        grid6[3] = '0' + (igrid6 % 10);
+        igrid6 /= 10;
+        grid6[2] = '0' + (igrid6 % 10);
+        igrid6 /= 10;
+        grid6[1] = 'A' + (igrid6 % 18);
+        igrid6 /= 18;
+        grid6[0] = 'A' + (igrid6 % 18);
+        grid6[6] = '\0';
+
+        snprintf(message, FTX_MAX_MESSAGE_LENGTH, "%s %s", callsign, grid6);
+    }
+
+    return FTX_MESSAGE_RC_OK;
 }

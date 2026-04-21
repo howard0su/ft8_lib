@@ -212,7 +212,11 @@ void decode(const monitor_t* mon, struct tm* tm_slot_start)
         if (found_empty_slot)
         {
             char text[FTX_MAX_MESSAGE_LENGTH];
-            ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text);
+            ftx_message_rc_t unpack_status;
+            if (wf->protocol == FTX_PROTOCOL_FST4W)
+                unpack_status = fst4w_message_decode(&message, &hash_if, text);
+            else
+                unpack_status = ftx_message_decode(&message, &hash_if, text);
             if (unpack_status != FTX_MESSAGE_RC_OK)
             {
                 snprintf(text, sizeof(text), "Error [%d] while unpacking!", (int)unpack_status);

@@ -117,6 +117,10 @@ void ftx_message_decode_free(const ftx_message_t* msg, char* text);
 void ftx_message_decode_telemetry_hex(const ftx_message_t* msg, char* telemetry_hex);
 void ftx_message_decode_telemetry(const ftx_message_t* msg, uint8_t* telemetry);
 
+/// Decode FST4W 50-bit WSPR message into human-readable text
+/// Format: "CALLSIGN GRID POWER" (e.g. "K1JT FN20 37")
+ftx_message_rc_t fst4w_message_decode(const ftx_message_t* msg, ftx_callsign_hash_interface_t* hash_if, char* message);
+
 #ifdef FTX_DEBUG_PRINT
 void ftx_message_print(ftx_message_t* msg);
 #endif
