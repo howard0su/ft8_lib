@@ -20,6 +20,7 @@
 const int kMin_score = 5; // Minimum sync score threshold for candidates
 const int kMax_candidates = 256;
 const int kLDPC_iterations = 25;
+const int kFST4_LDPC_iterations = 100;
 
 const int kMax_decoded_messages = 50;
 
@@ -170,9 +171,12 @@ void decode(const monitor_t* mon, struct tm* tm_slot_start)
         // save_wav(resynth_signal, resynth_len, 12000, resynth_path);
 #endif
 
+        int max_iters = (wf->protocol == FTX_PROTOCOL_FST4 || wf->protocol == FTX_PROTOCOL_FST4W)
+                            ? kFST4_LDPC_iterations
+                            : kLDPC_iterations;
         ftx_message_t message;
         ftx_decode_status_t status;
-        if (!ftx_decode_candidate(wf, cand, kLDPC_iterations, &message, &status))
+        if (!ftx_decode_candidate(wf, cand, max_iters, &message, &status))
         {
             if (status.ldpc_errors > 0)
             {
