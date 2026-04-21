@@ -3,6 +3,7 @@
 #include "constants.h"
 #include "crc.h"
 #include "ldpc.h"
+#include "fst4_ldpc.h"
 #include "osd.h"
 
 #include <stdbool.h>
@@ -35,6 +36,7 @@ static const float db_power_sum[40] = {
 /// @param[out] log174 Output of decoded log likelihoods for each of the 174 message bits
 static void ft4_extract_likelihood(const ftx_waterfall_t* wf, const ftx_candidate_t* cand, float* log174);
 static void ft8_extract_likelihood(const ftx_waterfall_t* wf, const ftx_candidate_t* cand, float* log174);
+static void fst4_extract_likelihood(const ftx_waterfall_t* wf, const ftx_candidate_t* cand, float* log240);
 
 /// Packs a string of bits each represented as a zero/non-zero byte in bit_array[],
 /// as a string of packed bits starting from the MSB of the first byte of packed[]
@@ -48,7 +50,7 @@ static float max4(float a, float b, float c, float d);
 static void heapify_down(ftx_candidate_t heap[], int heap_size);
 static void heapify_up(ftx_candidate_t heap[], int heap_size);
 
-static void ftx_normalize_logl(float* log174);
+static void ftx_normalize_logl(float* logl, int n);
 static void ft4_extract_symbol(const WF_ELEM_T* wf, float* logl);
 static void ft8_extract_symbol(const WF_ELEM_T* wf, float* logl);
 static void ft8_decode_multi_symbols(const WF_ELEM_T* wf, int num_bins, int n_syms, int bit_idx, float* log174);
@@ -191,10 +193,85 @@ static int ft4_sync_score(const ftx_waterfall_t* wf, const ftx_candidate_t* cand
     return score;
 }
 
+static int fst4_sync_score(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate)
+{
+    int score = 0;
+    int num_average = 0;
+
+    const WF_ELEM_T* mag_cand = get_cand_mag(wf, candidate);
+
+    // FST4 sync: S8 at positions 0, 38, 76, 114, 152
+    // sync_word1 at 0, 76, 152; sync_word2 at 38, 114
+    const int sync_pos[5] = { 0, 38, 76, 114, 152 };
+    const uint8_t* sync_words[5] = {
+        kFST4_Sync_word1, kFST4_Sync_word2,
+        kFST4_Sync_word1, kFST4_Sync_word2,
+        kFST4_Sync_word1
+    };
+
+    for (int m = 0; m < FST4_NUM_SYNC; ++m)
+    {
+        for (int k = 0; k < FST4_LENGTH_SYNC; ++k)
+        {
+            int block = sync_pos[m] + k;
+            int block_abs = candidate->time_offset + block;
+            if (block_abs < 0)
+                continue;
+            if (block_abs >= wf->num_blocks)
+                break;
+
+            const WF_ELEM_T* p4 = mag_cand + (block * wf->block_stride);
+            int sm = sync_words[m][k];
+
+            if (sm > 0)
+            {
+                score += WF_ELEM_MAG_INT(p4[sm]) - WF_ELEM_MAG_INT(p4[sm - 1]);
+                ++num_average;
+            }
+            if (sm < 3)
+            {
+                score += WF_ELEM_MAG_INT(p4[sm]) - WF_ELEM_MAG_INT(p4[sm + 1]);
+                ++num_average;
+            }
+            if ((k > 0) && (block_abs > 0))
+            {
+                score += WF_ELEM_MAG_INT(p4[sm]) - WF_ELEM_MAG_INT(p4[sm - wf->block_stride]);
+                ++num_average;
+            }
+            if (((k + 1) < FST4_LENGTH_SYNC) && ((block_abs + 1) < wf->num_blocks))
+            {
+                score += WF_ELEM_MAG_INT(p4[sm]) - WF_ELEM_MAG_INT(p4[sm + wf->block_stride]);
+                ++num_average;
+            }
+        }
+    }
+
+    if (num_average > 0)
+        score /= num_average;
+
+    return score;
+}
+
 int ftx_find_candidates(const ftx_waterfall_t* wf, int num_candidates, ftx_candidate_t heap[], int min_score)
 {
-    int (*sync_fun)(const ftx_waterfall_t*, const ftx_candidate_t*) = (wf->protocol == FTX_PROTOCOL_FT4) ? ft4_sync_score : ft8_sync_score;
-    int num_tones = (wf->protocol == FTX_PROTOCOL_FT4) ? 4 : 8;
+    int (*sync_fun)(const ftx_waterfall_t*, const ftx_candidate_t*);
+    int num_tones;
+
+    if (wf->protocol == FTX_PROTOCOL_FST4 || wf->protocol == FTX_PROTOCOL_FST4W)
+    {
+        sync_fun = fst4_sync_score;
+        num_tones = 4;
+    }
+    else if (wf->protocol == FTX_PROTOCOL_FT4)
+    {
+        sync_fun = ft4_sync_score;
+        num_tones = 4;
+    }
+    else
+    {
+        sync_fun = ft8_sync_score;
+        num_tones = 8;
+    }
 
     int heap_size = 0;
     ftx_candidate_t candidate;
@@ -307,24 +384,55 @@ static void ft8_extract_likelihood(const ftx_waterfall_t* wf, const ftx_candidat
     }
 }
 
-static void ftx_normalize_logl(float* log174)
+static void fst4_extract_likelihood(const ftx_waterfall_t* wf, const ftx_candidate_t* cand, float* log240)
 {
-    // Compute the variance of log174
+    const WF_ELEM_T* mag = get_cand_mag(wf, cand);
+
+    // FST4 frame: S8 D30 S8 D30 S8 D30 S8 D30 S8
+    // Data symbol positions: 8-37, 46-75, 84-113, 122-151
+    // Sync positions: 0-7, 38-45, 76-83, 114-121, 152-159
+    const int data_start[4] = { 8, 46, 84, 122 };
+
+    int bit_idx = 0;
+    for (int d = 0; d < 4; ++d)
+    {
+        for (int k = 0; k < 30; ++k)
+        {
+            int sym_idx = data_start[d] + k;
+            int block = cand->time_offset + sym_idx;
+
+            if ((block < 0) || (block >= wf->num_blocks))
+            {
+                log240[bit_idx + 0] = 0;
+                log240[bit_idx + 1] = 0;
+            }
+            else
+            {
+                ft4_extract_symbol(mag + (sym_idx * wf->block_stride), log240 + bit_idx);
+            }
+            bit_idx += 2;
+        }
+    }
+}
+
+static void ftx_normalize_logl(float* logl, int n)
+{
+    // Compute the variance of logl
     float sum = 0;
     float sum2 = 0;
-    for (int i = 0; i < FTX_LDPC_N; ++i)
+    for (int i = 0; i < n; ++i)
     {
-        sum += log174[i];
-        sum2 += log174[i] * log174[i];
+        sum += logl[i];
+        sum2 += logl[i] * logl[i];
     }
-    float inv_n = 1.0f / FTX_LDPC_N;
+    float inv_n = 1.0f / n;
     float variance = (sum2 - (sum * sum * inv_n)) * inv_n;
 
-    // Normalize log174 distribution and scale it with experimentally found coefficient
+    // Normalize logl distribution and scale it with experimentally found coefficient
     float norm_factor = sqrtf(24.0f / variance);
-    for (int i = 0; i < FTX_LDPC_N; ++i)
+    for (int i = 0; i < n; ++i)
     {
-        log174[i] *= norm_factor;
+        logl[i] *= norm_factor;
     }
 }
 
@@ -411,9 +519,82 @@ float ftx_substract(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate,
 
 bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand, int max_iterations, ftx_message_t* message, ftx_decode_status_t* status)
 {
-    float log174[FTX_LDPC_N]; // message bits encoded as likelihood
-
     LOG(LOG_INFO, "Freq: %d score: %d\n", cand->freq_offset, cand->score);
+
+    if (wf->protocol == FTX_PROTOCOL_FST4 || wf->protocol == FTX_PROTOCOL_FST4W)
+    {
+        float log240[FST4_LDPC_N];
+        fst4_extract_likelihood(wf, cand, log240);
+        ftx_normalize_logl(log240, FST4_LDPC_N);
+
+        uint8_t plain240[FST4_LDPC_N];
+
+        if (wf->protocol == FTX_PROTOCOL_FST4)
+        {
+            fst4_ldpc_decode(log240, max_iterations, plain240, &status->ldpc_errors);
+        }
+        else
+        {
+            fst4w_ldpc_decode(log240, max_iterations, plain240, &status->ldpc_errors);
+        }
+
+        if (status->ldpc_errors > 0)
+            return false;
+
+        int k_bits = (wf->protocol == FTX_PROTOCOL_FST4) ? FST4_LDPC_K : FST4W_LDPC_K;
+        int k_bytes = (wf->protocol == FTX_PROTOCOL_FST4) ? FST4_LDPC_K_BYTES : FST4W_LDPC_K_BYTES;
+
+        uint8_t packed[FST4_LDPC_K_BYTES]; // Use max size
+        pack_bits(plain240, k_bits, packed);
+
+        if (wf->protocol == FTX_PROTOCOL_FST4)
+        {
+            status->crc_valid = fst4_check_crc(packed);
+        }
+        else
+        {
+            status->crc_valid = fst4w_check_crc(packed);
+        }
+
+        if (!status->crc_valid)
+            return false;
+
+        message->hash = (wf->protocol == FTX_PROTOCOL_FST4)
+                            ? fst4_extract_crc(packed)
+                            : fst4w_extract_crc(packed);
+
+        if (wf->protocol == FTX_PROTOCOL_FST4)
+        {
+            // XOR with pseudorandom sequence (same as FT4)
+            for (int i = 0; i < 10; ++i)
+            {
+                message->payload[i] = packed[i] ^ kFT4_XOR_sequence[i];
+            }
+            uint8_t tones[FST4_NN];
+            fst4_encode(message->payload, tones);
+            message->snr = ftx_substract(wf, cand, tones, FST4_NN);
+        }
+        else
+        {
+            // FST4W: no XOR, 50-bit payload in first 7 bytes
+            for (int i = 0; i < k_bytes; ++i)
+            {
+                message->payload[i] = packed[i];
+            }
+            for (int i = k_bytes; i < 10; ++i)
+            {
+                message->payload[i] = 0;
+            }
+            uint8_t tones[FST4_NN];
+            fst4w_encode(message->payload, tones);
+            message->snr = ftx_substract(wf, cand, tones, FST4_NN);
+        }
+
+        return true;
+    }
+
+    // FT8/FT4 path
+    float log174[FTX_LDPC_N];
 
     if (wf->protocol == FTX_PROTOCOL_FT4)
     {
@@ -424,7 +605,7 @@ bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand
         ft8_extract_likelihood(wf, cand, log174);
     }
 
-    ftx_normalize_logl(log174);
+    ftx_normalize_logl(log174, FTX_LDPC_N);
 
     uint8_t plain174[FTX_LDPC_N]; // message bits (0/1)
     bp_decode(log174, max_iterations, plain174, &status->ldpc_errors);
