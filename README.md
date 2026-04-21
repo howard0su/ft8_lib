@@ -1,8 +1,8 @@
-# FT8 (and now FT4) library 
+# FT8/FT4/FST4/FST4W library 
 
-C implementation of a lightweight FT8/FT4 decoder and encoder, mostly intended for experimental use on microcontrollers.
+C implementation of a lightweight FT8/FT4/FST4/FST4W decoder and encoder, mostly intended for experimental use on microcontrollers.
 
-The intent of this library is to allow FT8/FT4 encoding and decoding in standalone environments (i.e. without a PC or RPi), e.g. automated beacons or SDR transceivers. It's also my learning process, optimization problem and source of fun.
+The intent of this library is to allow FT8/FT4/FST4/FST4W encoding and decoding in standalone environments (i.e. without a PC or RPi), e.g. automated beacons or SDR transceivers. It's also my learning process, optimization problem and source of fun.
 
 The encoding process is relatively light on resources, and an Arduino should be perfectly capable of running this code.
 
@@ -52,7 +52,36 @@ Currently the basic message set for establishing QSOs, as well as telemetry and 
 * Free-text messages (up to 13 characters from a limited alphabet) (decoding only, untested)
 * Telemetry data (71 bits as 18 hex symbols)
 
-Encoding and decoding works for both FT8 and FT4. For encoding and decoding, there is a console application provided for each, which serves mostly as test code, and could be a starting point for your potential application on an MCU. The console apps should run perfectly well on a RPi or a PC/Mac. I don't provide a concrete example for a particular MCU hardware here, since it would be very specific.
+Encoding and decoding works for FT8, FT4, FST4 and FST4W. For encoding and decoding, there is a console application provided for each, which serves mostly as test code, and could be a starting point for your potential application on an MCU. The console apps should run perfectly well on a RPi or a PC/Mac. I don't provide a concrete example for a particular MCU hardware here, since it would be very specific.
+
+## FST4/FST4W Support
+
+FST4 and FST4W are weak-signal digital protocols designed for LF and MF bands, supporting T/R periods of 15, 30, 60, 120, 300, 900, and 1800 seconds. Longer periods provide better sensitivity at the cost of QSO speed.
+
+**Decoding a FST4 WAV file:**
+```
+./decode_ft8 -fst4 <period> <wav_file>
+```
+For example, to decode a 60-second FST4 recording:
+```
+./decode_ft8 -fst4 60 test/fst4/210115_0058.wav
+```
+
+**Decoding a FST4W WAV file:**
+```
+./decode_ft8 -fst4w <period> <wav_file>
+```
+
+**Encoding a FST4 message:**
+```
+./gen_ft8 -fst4 <period> "<message>" [frequency]
+```
+
+Key implementation details:
+* FST4 uses a (240,101) LDPC code with 4-GFSK modulation and CRC-24 error detection
+* FST4W uses a (240,74) LDPC code optimized for WSPR-like beacon operation
+* The decoder uses a rectangular FFT window (vs Hann for FT8/FT4) since FST4 tone spacing equals the FFT bin width, providing orthogonal tone detection
+* Tested against WSJT-X `fst4sim` signals from 0 to -20 dB SNR with 100% decode rate
 
 The code is not yet really a library, rather a collection of routines and example code.
 
@@ -66,9 +95,9 @@ These features are low on my priority list:
 
 # What to do with it
 
-You can generate 15-second WAV files with your own messages as a proof of concept or for testing purposes. They can either be played back or opened directly from WSJT-X. To do that, run ```make```. Then run ```gen_ft8``` (run it without parameters to check what parameters are supported). Currently messages are modulated at 1000-1050 Hz.
+You can generate WAV files with your own messages as a proof of concept or for testing purposes. They can either be played back or opened directly from WSJT-X. To do that, run ```make```. Then run ```gen_ft8``` (run it without parameters to check what parameters are supported). Currently messages are modulated at 1000-1050 Hz.
 
-You can decode 15-second (or shorter) WAV files with ```decode_ft8```. This is only an example application and does not support live processing/recording. For that you could use third party code (PortAudio, for example).
+You can decode WAV files with ```decode_ft8```. For FT8/FT4, use 15-second (or shorter) recordings. For FST4/FST4W, use recordings matching the T/R period (15s to 1800s). This is only an example application and does not support live processing/recording. For that you could use third party code (PortAudio, for example).
 
 # References and credits
 
