@@ -48,6 +48,8 @@ typedef struct
     WF_ELEM_T* mag;          ///< FFT magnitudes stored as uint8_t[blocks][time_osr][freq_osr][num_bins]
     int block_stride;        ///< Helper value = time_osr * freq_osr * num_bins
     ftx_protocol_t protocol; ///< Indicate if using FT4 or FT8
+    float mag_db_scale;      ///< dB-to-uint8 scale: uint8 = db * mag_db_scale + mag_db_offset
+    float mag_db_offset;     ///< dB-to-uint8 offset
 } ftx_waterfall_t;
 
 /// Output structure of ftx_find_sync() and input structure of ftx_decode().

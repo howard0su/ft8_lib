@@ -9,7 +9,7 @@
 #include <stdbool.h>
 #include <math.h>
 
-//#define LOG_LEVEL LOG_DEBUG
+#define LOG_LEVEL LOG_INFO
 #include "debug.h"
 
 #define kMaxLDPCErrors 32
@@ -223,26 +223,12 @@ static int fst4_sync_score(const ftx_waterfall_t* wf, const ftx_candidate_t* can
             const WF_ELEM_T* p4 = mag_cand + (block * wf->block_stride);
             int sm = sync_words[m][k];
 
-            if (sm > 0)
-            {
-                score += WF_ELEM_MAG_INT(p4[sm]) - WF_ELEM_MAG_INT(p4[sm - 1]);
-                ++num_average;
-            }
-            if (sm < 3)
-            {
-                score += WF_ELEM_MAG_INT(p4[sm]) - WF_ELEM_MAG_INT(p4[sm + 1]);
-                ++num_average;
-            }
-            if ((k > 0) && (block_abs > 0))
-            {
-                score += WF_ELEM_MAG_INT(p4[sm]) - WF_ELEM_MAG_INT(p4[sm - wf->block_stride]);
-                ++num_average;
-            }
-            if (((k + 1) < FST4_LENGTH_SYNC) && ((block_abs + 1) < wf->num_blocks))
-            {
-                score += WF_ELEM_MAG_INT(p4[sm]) - WF_ELEM_MAG_INT(p4[sm + wf->block_stride]);
-                ++num_average;
-            }
+            // Compare expected tone to average of all tones
+            // score += 4*p4[sm] - sum(p4[0..3])  (equivalent to 3*p4[sm] - sum of others)
+            score += (4 * WF_ELEM_MAG_INT(p4[sm]))
+                   - WF_ELEM_MAG_INT(p4[0]) - WF_ELEM_MAG_INT(p4[1])
+                   - WF_ELEM_MAG_INT(p4[2]) - WF_ELEM_MAG_INT(p4[3]);
+            num_average += 4;
         }
     }
 
@@ -519,7 +505,7 @@ float ftx_substract(const ftx_waterfall_t* wf, const ftx_candidate_t* candidate,
 
 bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand, int max_iterations, ftx_message_t* message, ftx_decode_status_t* status)
 {
-    LOG(LOG_INFO, "Freq: %d score: %d\n", cand->freq_offset, cand->score);
+    LOG(LOG_INFO, "Freq: %d score: %d time_off: %d time_sub: %d freq_sub: %d\n", cand->freq_offset, cand->score, cand->time_offset, cand->time_sub, cand->freq_sub);
 
     if (wf->protocol == FTX_PROTOCOL_FST4 || wf->protocol == FTX_PROTOCOL_FST4W)
     {
@@ -537,6 +523,8 @@ bool ftx_decode_candidate(const ftx_waterfall_t* wf, const ftx_candidate_t* cand
         {
             fst4w_ldpc_decode(log240, max_iterations, plain240, &status->ldpc_errors);
         }
+
+        LOG(LOG_DEBUG, "LDPC errors: %d\n", status->ldpc_errors);
 
         if (status->ldpc_errors > 0)
             return false;

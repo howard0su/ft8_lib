@@ -38,30 +38,59 @@ uint16_t ftx_compute_crc(const uint8_t message[], int num_bits)
 
 #define FST4_TOPBIT (1u << (FST4_CRC_WIDTH - 1))
 
+/// Compute CRC-24 matching WSJT-X get_crc24.f90 algorithm exactly.
+/// Processes individual bits from packed bytes (MSB-first byte order).
+/// The Fortran code works on individual bit arrays; this version unpacks from bytes.
 uint32_t fst4_compute_crc(const uint8_t message[], int num_bits)
 {
-    uint32_t remainder = 0;
-    int idx_byte = 0;
-
-    for (int idx_bit = 0; idx_bit < num_bits; ++idx_bit)
+    // Extract individual bits from packed bytes (MSB first)
+    // Equivalent to Fortran mc(1:num_bits)
+    
+    // Polynomial as bit array: p(1:25) = {1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,0,1,1,0,1,1}
+    // This is 0x100065B
+    static const uint8_t poly[25] = {1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,0,1,1,0,1,1};
+    
+    // Helper to get bit i from packed bytes (MSB-first)
+    #define GET_BIT(arr, i) (((arr)[(i)/8] >> (7 - ((i) % 8))) & 1)
+    
+    // Initialize shift register with first 25 message bits
+    uint8_t r[25];
+    for (int i = 0; i < 25 && i < num_bits; i++)
     {
-        if (idx_bit % 8 == 0)
-        {
-            remainder ^= ((uint32_t)message[idx_byte] << (FST4_CRC_WIDTH - 8));
-            ++idx_byte;
-        }
-
-        if (remainder & FST4_TOPBIT)
-        {
-            remainder = (remainder << 1) ^ FST4_CRC_POLYNOMIAL;
-        }
-        else
-        {
-            remainder = (remainder << 1);
-        }
+        r[i] = GET_BIT(message, i);
     }
-
-    return remainder & ((FST4_TOPBIT << 1) - 1u);
+    
+    // Process remaining bits
+    for (int i = 0; i <= num_bits - 25; i++)
+    {
+        if (i + 24 < num_bits)
+            r[24] = GET_BIT(message, i + 24);
+        else
+            r[24] = 0;
+        
+        uint8_t feedback = r[0];
+        // XOR with polynomial if MSB is 1
+        if (feedback)
+        {
+            for (int j = 0; j < 25; j++)
+                r[j] ^= poly[j];
+        }
+        // Circular shift left by 1
+        uint8_t tmp = r[0];
+        for (int j = 0; j < 24; j++)
+            r[j] = r[j + 1];
+        r[24] = tmp;
+    }
+    
+    // Convert r[0:23] to 24-bit integer
+    uint32_t crc = 0;
+    for (int i = 0; i < 24; i++)
+    {
+        crc = (crc << 1) | r[i];
+    }
+    
+    #undef GET_BIT
+    return crc;
 }
 
 uint16_t ftx_extract_crc(const uint8_t a91[])

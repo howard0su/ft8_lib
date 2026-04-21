@@ -94,16 +94,42 @@ void monitor_init(monitor_t* me, const monitor_config_t* cfg)
     me->subblock_size = me->block_size / cfg->time_osr;
     me->nfft = me->block_size * cfg->freq_osr;
     me->fft_norm = 2.0f / me->nfft;
-    // const int len_window = 1.8f * me->block_size; // hand-picked and optimized
+
+    // Window length: for FST4/FST4W, use block_size (1 symbol) with zero-padding
+    // to achieve frequency oversampling without spanning multiple symbols.
+    // FST4 uses a RECTANGULAR window because the tone spacing (1/Ts) matches the
+    // symbol rate, giving perfect orthogonality (sinc null at adjacent tones).
+    // A Hann window would leak -6 dB into adjacent tones, destroying tone contrast.
+    // For FT8/FT4, use the full nfft samples with Hann window (traditional approach).
+    int window_len = me->nfft;
+    bool use_rect_window = false;
+    if (cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W)
+    {
+        window_len = me->block_size;
+        use_rect_window = true;
+    }
 
     me->window = (float*)malloc(me->nfft * sizeof(me->window[0]));
     for (int i = 0; i < me->nfft; ++i)
     {
-        // window[i] = 1;
-        me->window[i] = me->fft_norm * hann_i(i, me->nfft);
-        // me->window[i] = blackman_i(i, me->nfft);
-        // me->window[i] = hamming_i(i, me->nfft);
-        // me->window[i] = (i < len_window) ? hann_i(i, len_window) : 0;
+        // For zero-padded mode, the window is applied to the LAST window_len samples
+        // of last_frame (the most recent data), with zero-padding before.
+        int data_offset = me->nfft - window_len;
+        if (i >= data_offset)
+        {
+            if (use_rect_window)
+            {
+                me->window[i] = me->fft_norm;
+            }
+            else
+            {
+                me->window[i] = me->fft_norm * hann_i(i - data_offset, window_len);
+            }
+        }
+        else
+        {
+            me->window[i] = 0; // zero-padding region (old data suppressed)
+        }
     }
     me->last_frame = (float*)calloc(me->nfft, sizeof(me->last_frame[0]));
 
@@ -139,6 +165,20 @@ void monitor_init(monitor_t* me, const monitor_config_t* cfg)
 
     waterfall_init(&me->wf, max_blocks, num_bins, cfg->time_osr, cfg->freq_osr);
     me->wf.protocol = cfg->protocol;
+
+    // Set dB-to-uint8 scaling parameters
+    // For FST4/FST4W: wider range (1 dB/step) to avoid clipping at high SNR
+    // For FT8/FT4: original range (0.5 dB/step) for maximum weak-signal resolution
+    if (cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W)
+    {
+        me->wf.mag_db_scale = 1.0f;
+        me->wf.mag_db_offset = 120.0f;
+    }
+    else
+    {
+        me->wf.mag_db_scale = 2.0f;
+        me->wf.mag_db_offset = 240.0f;
+    }
 
     me->symbol_period = symbol_period;
 
@@ -212,8 +252,7 @@ void monitor_process(monitor_t* me, const float* frame)
                 me->wf.mag[offset].phase = phase;
 #else
                 // Scale decibels to unsigned 8-bit range and clamp the value
-                // Range 0-240 covers -120..0 dB in 0.5 dB steps
-                int scaled = (int)(2 * db + 240);
+                int scaled = (int)(me->wf.mag_db_scale * db + me->wf.mag_db_offset);
                 me->wf.mag[offset] = (scaled < 0) ? 0 : ((scaled > 255) ? 255 : scaled);
 #endif
                 ++offset;

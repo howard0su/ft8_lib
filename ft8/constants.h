@@ -74,7 +74,8 @@ extern "C"
 #define FTX_CRC_POLYNOMIAL ((uint16_t)0x2757u) ///< CRC-14 polynomial without the leading (MSB) 1
 #define FTX_CRC_WIDTH      (14)
 
-// CRC-24 polynomial for FST4/FST4W: x^24 + x^10 + x^9 + x^6 + x^4 + x^3 + x + 1
+// CRC-24 polynomial for FST4/FST4W (from WSJT-X lib/fst4/get_crc24.f90):
+// p = {1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,1,0,1,1,0,1,1}
 // = 0x100065B (25 bits with leading 1)
 #define FST4_CRC_POLYNOMIAL ((uint32_t)0x00065Bu) ///< CRC-24 polynomial without leading 1
 #define FST4_CRC_WIDTH      (24)

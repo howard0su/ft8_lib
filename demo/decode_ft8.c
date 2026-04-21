@@ -374,14 +374,23 @@ int main(int argc, char** argv)
         is_live = true;
     }
 
+    // For FST4/FST4W, use time_osr=4 for sub-symbol timing resolution
+    // while the zero-padded window prevents cross-symbol contamination.
+    int time_osr = kTime_osr;
+    int freq_osr = kFreq_osr;
+    if (protocol == FTX_PROTOCOL_FST4 || protocol == FTX_PROTOCOL_FST4W)
+    {
+        time_osr = 4;
+    }
+
     // Compute FFT over the whole signal and store it
     monitor_t mon;
     monitor_config_t mon_cfg = {
         .f_min = 200,
         .f_max = 3000,
         .sample_rate = sample_rate,
-        .time_osr = kTime_osr,
-        .freq_osr = kFreq_osr,
+        .time_osr = time_osr,
+        .freq_osr = freq_osr,
         .protocol = protocol,
         .tr_period = tr_period
     };
