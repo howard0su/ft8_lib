@@ -166,20 +166,6 @@ void monitor_init(monitor_t* me, const monitor_config_t* cfg)
     waterfall_init(&me->wf, max_blocks, num_bins, cfg->time_osr, cfg->freq_osr);
     me->wf.protocol = cfg->protocol;
 
-    // Set dB-to-uint8 scaling parameters
-    // For FST4/FST4W: wider range (1 dB/step) to avoid clipping at high SNR
-    // For FT8/FT4: original range (0.5 dB/step) for maximum weak-signal resolution
-    if (cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W)
-    {
-        me->wf.mag_db_scale = 1.0f;
-        me->wf.mag_db_offset = 120.0f;
-    }
-    else
-    {
-        me->wf.mag_db_scale = 2.0f;
-        me->wf.mag_db_offset = 240.0f;
-    }
-
     me->symbol_period = symbol_period;
 
     me->max_mag = -120.0f;
@@ -252,7 +238,7 @@ void monitor_process(monitor_t* me, const float* frame)
                 me->wf.mag[offset].phase = phase;
 #else
                 // Scale decibels to unsigned 8-bit range and clamp the value
-                int scaled = (int)(me->wf.mag_db_scale * db + me->wf.mag_db_offset);
+                int scaled = (int)(2 * db + 240);
                 me->wf.mag[offset] = (scaled < 0) ? 0 : ((scaled > 255) ? 255 : scaled);
 #endif
                 ++offset;
