@@ -11,6 +11,7 @@
 
 #include "ldpc.h"
 #include "constants.h"
+#include "fast_math.h"
 
 #include <stdio.h>
 #include <math.h>
@@ -18,8 +19,6 @@
 #include <stdbool.h>
 
 static int ldpc_check(uint8_t codeword[]);
-static float fast_tanh(float x);
-static float fast_atanh(float x);
 
 
 /**
@@ -176,13 +175,20 @@ void bp_decode(const float codeword[], int max_iters, uint8_t plain[], int* ok)
         tov[n][0] = tov[n][1] = tov[n][2] = 0;
     }
 
+    // Precomputed sum: codeword[n] + tov[n][0] + tov[n][1] + tov[n][2]
+    float tov_sum[FTX_LDPC_N];
+    for (int n = 0; n < FTX_LDPC_N; ++n)
+    {
+        tov_sum[n] = codeword[n];
+    }
+
     for (int iter = 0; iter < max_iters; ++iter)
     {
         // Do a hard decision guess (tov=0 in iter 0)
         int plain_sum = 0;
         for (int n = 0; n < FTX_LDPC_N; ++n)
         {
-            plain[n] = ((codeword[n] + tov[n][0] + tov[n][1] + tov[n][2]) > 0) ? 1 : 0;
+            plain[n] = (tov_sum[n] > 0) ? 1 : 0;
             plain_sum += plain[n];
         }
 
@@ -208,27 +214,54 @@ void bp_decode(const float codeword[], int max_iters, uint8_t plain[], int* ok)
         }
 
         // Send messages from bits to check nodes
-        for (int m = 0; m < FTX_LDPC_M; ++m)
+        // Tnm = tov_sum[n] - tov[n][excluded_m_idx]
+        // Collect Tnm values in batch buffer, process 4 at a time
         {
-            for (int n_idx = 0; n_idx < kFTX_LDPC_Num_rows[m]; ++n_idx)
+            float tanh_in[8];  // batch buffer (padded to 8 for alignment)
+            int tanh_m[8], tanh_nidx[8]; // where to store results
+            int batch_count = 0;
+
+            for (int m = 0; m < FTX_LDPC_M; ++m)
             {
-                int n = kFTX_LDPC_Nm[m][n_idx] - 1;
-                // for each (n, m)
-                float Tnm = codeword[n];
-                for (int m_idx = 0; m_idx < 3; ++m_idx)
+                for (int n_idx = 0; n_idx < kFTX_LDPC_Num_rows[m]; ++n_idx)
                 {
-                    if ((kFTX_LDPC_Mn[n][m_idx] - 1) != m)
+                    int n = kFTX_LDPC_Nm[m][n_idx] - 1;
+                    // Find which of the 3 check indices for bit n corresponds to m
+                    float Tnm = tov_sum[n];
+                    for (int m_idx = 0; m_idx < 3; ++m_idx)
                     {
-                        Tnm += tov[n][m_idx];
+                        if ((kFTX_LDPC_Mn[n][m_idx] - 1) == m)
+                        {
+                            Tnm -= tov[n][m_idx];
+                            break;
+                        }
+                    }
+
+                    tanh_in[batch_count] = -Tnm / 2;
+                    tanh_m[batch_count] = m;
+                    tanh_nidx[batch_count] = n_idx;
+                    batch_count++;
+
+                    if (batch_count == 4)
+                    {
+                        float tanh_out[4];
+                        fast_tanh4(tanh_out, tanh_in);
+                        for (int k = 0; k < 4; ++k)
+                            toc[tanh_m[k]][tanh_nidx[k]] = tanh_out[k];
+                        batch_count = 0;
                     }
                 }
-                toc[m][n_idx] = fast_tanh(-Tnm / 2);
             }
+            // Flush remaining
+            for (int k = 0; k < batch_count; ++k)
+                toc[tanh_m[k]][tanh_nidx[k]] = fast_tanh(tanh_in[k]);
         }
 
         // send messages from check nodes to variable nodes
+        // and update tov_sum
         for (int n = 0; n < FTX_LDPC_N; ++n)
         {
+            float new_sum = codeword[n];
             for (int m_idx = 0; m_idx < 3; ++m_idx)
             {
                 int m = kFTX_LDPC_Mn[n][m_idx] - 1;
@@ -242,7 +275,9 @@ void bp_decode(const float codeword[], int max_iters, uint8_t plain[], int* ok)
                     }
                 }
                 tov[n][m_idx] = -2 * fast_atanh(Tmn);
+                new_sum += tov[n][m_idx];
             }
+            tov_sum[n] = new_sum;
         }
     }
 
@@ -281,42 +316,4 @@ void ldpc_encode(const uint8_t plain[FTX_LDPC_K], uint8_t codeword[FTX_LDPC_N])
             codeword[i + FTX_LDPC_K] = sum % 2;
         }
     }
-}
-
-// Ideas for approximating tanh/atanh:
-// * https://varietyofsound.wordpress.com/2011/02/14/efficient-tanh-computation-using-lamberts-continued-fraction/
-// * http://functions.wolfram.com/ElementaryFunctions/ArcTanh/10/0001/
-// * https://mathr.co.uk/blog/2017-09-06_approximating_hyperbolic_tangent.html
-// * https://math.stackexchange.com/a/446411
-
-static float fast_tanh(float x)
-{
-    if (x < -4.97f)
-    {
-        return -1.0f;
-    }
-    if (x > 4.97f)
-    {
-        return 1.0f;
-    }
-    float x2 = x * x;
-    // float a = x * (135135.0f + x2 * (17325.0f + x2 * (378.0f + x2)));
-    // float b = 135135.0f + x2 * (62370.0f + x2 * (3150.0f + x2 * 28.0f));
-    // float a = x * (10395.0f + x2 * (1260.0f + x2 * 21.0f));
-    // float b = 10395.0f + x2 * (4725.0f + x2 * (210.0f + x2));
-    float a = x * (945.0f + x2 * (105.0f + x2));
-    float b = 945.0f + x2 * (420.0f + x2 * 15.0f);
-    return a / b;
-}
-
-static float fast_atanh(float x)
-{
-    float x2 = x * x;
-    // float a = x * (-15015.0f + x2 * (19250.0f + x2 * (-5943.0f + x2 * 256.0f)));
-    // float b = (-15015.0f + x2 * (24255.0f + x2 * (-11025.0f + x2 * 1225.0f)));
-    // float a = x * (-1155.0f + x2 * (1190.0f + x2 * -231.0f));
-    // float b = (-1155.0f + x2 * (1575.0f + x2 * (-525.0f + x2 * 25.0f)));
-    float a = x * (945.0f + x2 * (-735.0f + x2 * 64.0f));
-    float b = (945.0f + x2 * (-1050.0f + x2 * 225.0f));
-    return a / b;
 }

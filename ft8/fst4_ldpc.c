@@ -13,6 +13,7 @@
 
 #include "fst4_ldpc.h"
 #include "constants.h"
+#include "fast_math.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -23,26 +24,6 @@ static uint8_t parity8(uint8_t x)
     x ^= x >> 2;
     x ^= x >> 1;
     return x & 1;
-}
-
-static float fast_tanh(float x)
-{
-    if (x < -4.97f)
-        return -1.0f;
-    if (x > 4.97f)
-        return 1.0f;
-    float x2 = x * x;
-    float a = x * (945.0f + x2 * (105.0f + x2));
-    float b = 945.0f + x2 * (420.0f + x2 * 15.0f);
-    return a / b;
-}
-
-static float fast_atanh(float x)
-{
-    float x2 = x * x;
-    float a = x * (945.0f + x2 * (-735.0f + x2 * 64.0f));
-    float b = (945.0f + x2 * (-1050.0f + x2 * 225.0f));
-    return a / b;
 }
 
 // Generic bitpacked LDPC encoder: info_bits → codeword using generator matrix
@@ -117,13 +98,20 @@ static void bp_decode_240(const float codeword[], int max_iters,
         tov[i][0] = tov[i][1] = tov[i][2] = 0;
     }
 
+    // Precomputed sum: codeword[i] + tov[i][0] + tov[i][1] + tov[i][2]
+    float tov_sum[FST4_LDPC_N];
+    for (int i = 0; i < n; ++i)
+    {
+        tov_sum[i] = codeword[i];
+    }
+
     for (int iter = 0; iter < max_iters; ++iter)
     {
         // Hard decision
         int plain_sum = 0;
         for (int i = 0; i < n; ++i)
         {
-            plain[i] = ((codeword[i] + tov[i][0] + tov[i][1] + tov[i][2]) > 0) ? 1 : 0;
+            plain[i] = (tov_sum[i] > 0) ? 1 : 0;
             plain_sum += plain[i];
         }
 
@@ -154,28 +142,54 @@ static void bp_decode_240(const float codeword[], int max_iters,
                 break;
         }
 
-        // Messages from bits to check nodes
-        for (int j = 0; j < m; ++j)
+        // Messages from bits to check nodes (batch tanh)
+        // Tnm = tov_sum[ni] - tov[ni][excluded_m_idx]
         {
-            int nrw = num_rows[j];
-            for (int n_idx = 0; n_idx < nrw; ++n_idx)
+            float tanh_in[4];
+            int tanh_j[4], tanh_nidx[4];
+            int batch_count = 0;
+
+            for (int j = 0; j < m; ++j)
             {
-                int ni = nm[j * max_nrw + n_idx];
-                float Tnm = codeword[ni];
-                for (int m_idx = 0; m_idx < 3; ++m_idx)
+                int nrw = num_rows[j];
+                for (int n_idx = 0; n_idx < nrw; ++n_idx)
                 {
-                    if (mn[ni * 3 + m_idx] != (uint16_t)j)
+                    int ni = nm[j * max_nrw + n_idx];
+                    float Tnm = tov_sum[ni];
+                    for (int m_idx = 0; m_idx < 3; ++m_idx)
                     {
-                        Tnm += tov[ni][m_idx];
+                        if (mn[ni * 3 + m_idx] == (uint16_t)j)
+                        {
+                            Tnm -= tov[ni][m_idx];
+                            break;
+                        }
+                    }
+
+                    tanh_in[batch_count] = -Tnm / 2;
+                    tanh_j[batch_count] = j;
+                    tanh_nidx[batch_count] = n_idx;
+                    batch_count++;
+
+                    if (batch_count == 4)
+                    {
+                        float tanh_out[4];
+                        fast_tanh4(tanh_out, tanh_in);
+                        for (int k = 0; k < 4; ++k)
+                            toc[tanh_j[k]][tanh_nidx[k]] = tanh_out[k];
+                        batch_count = 0;
                     }
                 }
-                toc[j][n_idx] = fast_tanh(-Tnm / 2);
             }
+            // Flush remaining
+            for (int k = 0; k < batch_count; ++k)
+                toc[tanh_j[k]][tanh_nidx[k]] = fast_tanh(tanh_in[k]);
         }
 
         // Messages from check nodes to variable nodes
+        // Update tov and tov_sum together
         for (int i = 0; i < n; ++i)
         {
+            float new_sum = codeword[i];
             for (int m_idx = 0; m_idx < 3; ++m_idx)
             {
                 int j = mn[i * 3 + m_idx];
@@ -189,7 +203,9 @@ static void bp_decode_240(const float codeword[], int max_iters,
                     }
                 }
                 tov[i][m_idx] = -2 * fast_atanh(Tmn);
+                new_sum += tov[i][m_idx];
             }
+            tov_sum[i] = new_sum;
         }
     }
 
