@@ -177,6 +177,22 @@ ftx_check_crc(const uint8_t a91[FTX_LDPC_K])
     return true;
 }
 
+bool ftx_check_crc_packed(const uint8_t a91_packed[])
+{
+    uint16_t crc_stored = ftx_extract_crc(a91_packed);
+
+    // Compute CRC over 82 bits (77 payload + 5 zeros)
+    uint8_t tmp[FTX_LDPC_K_BYTES];
+    for (int i = 0; i < 10; i++)
+        tmp[i] = a91_packed[i];
+    tmp[9] &= 0xF8u;
+    tmp[10] = 0;
+    tmp[11] = 0;
+
+    uint16_t crc_computed = ftx_compute_crc(tmp, 82);
+    return crc_stored == crc_computed;
+}
+
 uint32_t fst4_extract_crc(const uint8_t a101[])
 {
     // CRC-24 starts at bit 77 in the 101-bit message

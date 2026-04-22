@@ -62,7 +62,10 @@ bool fst4w_check_crc(const uint8_t a74[]);
 // Calculate 14-bit CRC for a sequence of given number of bits
 void ftx_crc(const uint8_t msg1[], int msglen, uint8_t out[]);
 
-// check if bits are crc valid
+// check if packed bytes are crc valid (works on packed byte arrays like FST4 CRC functions)
+bool ftx_check_crc_packed(const uint8_t a91_packed[]);
+
+// check if bits are crc valid (legacy interface, works on unpacked bit arrays)
 bool ftx_check_crc(const uint8_t a91[]);
 
 #ifdef __cplusplus

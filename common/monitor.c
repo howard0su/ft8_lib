@@ -102,12 +102,11 @@ void monitor_init(monitor_t* me, const monitor_config_t* cfg)
     // A Hann window would leak -6 dB into adjacent tones, destroying tone contrast.
     // For FT8/FT4, use the full nfft samples with Hann window (traditional approach).
     int window_len = me->nfft;
-    bool use_rect_window = false;
     if (cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W)
     {
         window_len = me->block_size;
-        use_rect_window = true;
     }
+    bool use_rect_window = cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W;
 
     me->window = (float*)malloc(me->nfft * sizeof(me->window[0]));
     for (int i = 0; i < me->nfft; ++i)
@@ -164,7 +163,7 @@ void monitor_init(monitor_t* me, const monitor_config_t* cfg)
     const int num_bins = me->max_bin - me->min_bin;
 
     waterfall_init(&me->wf, max_blocks, num_bins, cfg->time_osr, cfg->freq_osr);
-    me->wf.protocol = cfg->protocol;
+    me->wf.desc = ftx_protocol_get_desc(cfg->protocol);
 
     me->symbol_period = symbol_period;
 
