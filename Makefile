@@ -12,7 +12,7 @@ FFT_OBJ  = $(patsubst %.c,$(BUILD_DIR)/%.o,$(FFT_SRC))
 TARGETS  = gen_ft8 decode_ft8 test_ft8
 
 CPPFLAGS = -std=c++11 -I. -O3 -ggdb3 -D_GNU_SOURCE
-LDFLAGS  = -fsanitize=address -lm
+LDFLAGS  = -lm
 
 # Optionally, use Portaudio for live audio input
 ifdef PORTAUDIO_PREFIX
