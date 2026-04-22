@@ -93,6 +93,44 @@ static void bp_decode_240(const float codeword[], int max_iters,
 
     int min_errors = m;
 
+    // Precompute index lookup tables
+    // nm_midx[j][n_idx]: which of variable node's 3 check indices points back to check j
+    // mn_nidx[i][m_idx]: position of variable node i in check node j's neighbor list
+    uint8_t nm_midx[FST4W_LDPC_M][FST4_LDPC_MAX_NRW];
+    uint8_t mn_nidx[FST4_LDPC_N][3];
+    for (int j = 0; j < m; ++j)
+    {
+        int nrw = num_rows[j];
+        for (int n_idx = 0; n_idx < nrw; ++n_idx)
+        {
+            int ni = nm[j * max_nrw + n_idx];
+            for (int mi = 0; mi < 3; ++mi)
+            {
+                if (mn[ni * 3 + mi] == (uint16_t)j)
+                {
+                    nm_midx[j][n_idx] = mi;
+                    break;
+                }
+            }
+        }
+    }
+    for (int i = 0; i < n; ++i)
+    {
+        for (int m_idx = 0; m_idx < 3; ++m_idx)
+        {
+            int j = mn[i * 3 + m_idx];
+            int nrw = num_rows[j];
+            for (int ni = 0; ni < nrw; ++ni)
+            {
+                if (nm[j * max_nrw + ni] == (uint16_t)i)
+                {
+                    mn_nidx[i][m_idx] = ni;
+                    break;
+                }
+            }
+        }
+    }
+
     for (int i = 0; i < n; ++i)
     {
         tov[i][0] = tov[i][1] = tov[i][2] = 0;
@@ -143,7 +181,7 @@ static void bp_decode_240(const float codeword[], int max_iters,
         }
 
         // Messages from bits to check nodes (batch tanh)
-        // Tnm = tov_sum[ni] - tov[ni][excluded_m_idx]
+        // Tnm = tov_sum[ni] - tov[ni][excluded_m_idx], using precomputed nm_midx
         {
             float tanh_in[4];
             int tanh_j[4], tanh_nidx[4];
@@ -155,15 +193,7 @@ static void bp_decode_240(const float codeword[], int max_iters,
                 for (int n_idx = 0; n_idx < nrw; ++n_idx)
                 {
                     int ni = nm[j * max_nrw + n_idx];
-                    float Tnm = tov_sum[ni];
-                    for (int m_idx = 0; m_idx < 3; ++m_idx)
-                    {
-                        if (mn[ni * 3 + m_idx] == (uint16_t)j)
-                        {
-                            Tnm -= tov[ni][m_idx];
-                            break;
-                        }
-                    }
+                    float Tnm = tov_sum[ni] - tov[ni][nm_midx[j][n_idx]];
 
                     tanh_in[batch_count] = -Tnm / 2;
                     tanh_j[batch_count] = j;
@@ -180,32 +210,36 @@ static void bp_decode_240(const float codeword[], int max_iters,
                     }
                 }
             }
-            // Flush remaining
             for (int k = 0; k < batch_count; ++k)
                 toc[tanh_j[k]][tanh_nidx[k]] = fast_tanh(tanh_in[k]);
         }
 
         // Messages from check nodes to variable nodes
-        // Update tov and tov_sum together
+        // Row-local prefix/suffix products for product-excluding-one in O(1)
+        for (int j = 0; j < m; ++j)
+        {
+            int nrw = num_rows[j];
+            float fwd[8], bwd[8];
+            fwd[0] = 1.0f;
+            for (int i = 0; i < nrw; ++i)
+                fwd[i + 1] = fwd[i] * toc[j][i];
+            bwd[nrw] = 1.0f;
+            for (int i = nrw - 1; i >= 0; --i)
+                bwd[i] = bwd[i + 1] * toc[j][i];
+
+            for (int n_idx = 0; n_idx < nrw; ++n_idx)
+            {
+                int ni = nm[j * max_nrw + n_idx];
+                int m_idx = nm_midx[j][n_idx];
+                float Tmn = fwd[n_idx] * bwd[n_idx + 1];
+                tov[ni][m_idx] = -2 * fast_atanh(Tmn);
+            }
+        }
+
+        // Update tov_sum
         for (int i = 0; i < n; ++i)
         {
-            float new_sum = codeword[i];
-            for (int m_idx = 0; m_idx < 3; ++m_idx)
-            {
-                int j = mn[i * 3 + m_idx];
-                float Tmn = 1.0f;
-                int nrw = num_rows[j];
-                for (int n_idx = 0; n_idx < nrw; ++n_idx)
-                {
-                    if (nm[j * max_nrw + n_idx] != (uint16_t)i)
-                    {
-                        Tmn *= toc[j][n_idx];
-                    }
-                }
-                tov[i][m_idx] = -2 * fast_atanh(Tmn);
-                new_sum += tov[i][m_idx];
-            }
-            tov_sum[i] = new_sum;
+            tov_sum[i] = codeword[i] + tov[i][0] + tov[i][1] + tov[i][2];
         }
     }
 

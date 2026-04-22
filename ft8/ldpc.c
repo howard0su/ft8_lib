@@ -169,6 +169,42 @@ void bp_decode(const float codeword[], int max_iters, uint8_t plain[], int* ok)
 
     int min_errors = FTX_LDPC_M;
 
+    // Precompute index lookup tables
+    // nm_midx[m][n_idx]: which of variable node's 3 check indices points back to check m
+    // mn_nidx[n][m_idx]: position of variable node n in check node m's neighbor list
+    uint8_t nm_midx[FTX_LDPC_M][7];
+    uint8_t mn_nidx[FTX_LDPC_N][3];
+    for (int m = 0; m < FTX_LDPC_M; ++m)
+    {
+        for (int n_idx = 0; n_idx < kFTX_LDPC_Num_rows[m]; ++n_idx)
+        {
+            int n = kFTX_LDPC_Nm[m][n_idx] - 1;
+            for (int mi = 0; mi < 3; ++mi)
+            {
+                if ((kFTX_LDPC_Mn[n][mi] - 1) == m)
+                {
+                    nm_midx[m][n_idx] = mi;
+                    break;
+                }
+            }
+        }
+    }
+    for (int n = 0; n < FTX_LDPC_N; ++n)
+    {
+        for (int m_idx = 0; m_idx < 3; ++m_idx)
+        {
+            int m = kFTX_LDPC_Mn[n][m_idx] - 1;
+            for (int ni = 0; ni < kFTX_LDPC_Num_rows[m]; ++ni)
+            {
+                if ((kFTX_LDPC_Nm[m][ni] - 1) == n)
+                {
+                    mn_nidx[n][m_idx] = ni;
+                    break;
+                }
+            }
+        }
+    }
+
     // initialize message data
     for (int n = 0; n < FTX_LDPC_N; ++n)
     {
@@ -194,31 +230,28 @@ void bp_decode(const float codeword[], int max_iters, uint8_t plain[], int* ok)
 
         if (plain_sum == 0)
         {
-            // message converged to all-zeros, which is prohibited
             min_errors = FTX_LDPC_M;
             break;
         }
 
-        // Check to see if we have a codeword (check before we do any iter)
+        // Check to see if we have a codeword
         int errors = ldpc_check(plain);
 
         if (errors < min_errors)
         {
-            // we have a better guess - update the result
             min_errors = errors;
 
             if (errors == 0)
             {
-                break; // Found a perfect answer
+                break;
             }
         }
 
         // Send messages from bits to check nodes
-        // Tnm = tov_sum[n] - tov[n][excluded_m_idx]
-        // Collect Tnm values in batch buffer, process 4 at a time
+        // Tnm = tov_sum[n] - tov[n][excluded_m_idx], using precomputed nm_midx
         {
-            float tanh_in[8];  // batch buffer (padded to 8 for alignment)
-            int tanh_m[8], tanh_nidx[8]; // where to store results
+            float tanh_in[8];
+            int tanh_m[8], tanh_nidx[8];
             int batch_count = 0;
 
             for (int m = 0; m < FTX_LDPC_M; ++m)
@@ -226,16 +259,7 @@ void bp_decode(const float codeword[], int max_iters, uint8_t plain[], int* ok)
                 for (int n_idx = 0; n_idx < kFTX_LDPC_Num_rows[m]; ++n_idx)
                 {
                     int n = kFTX_LDPC_Nm[m][n_idx] - 1;
-                    // Find which of the 3 check indices for bit n corresponds to m
-                    float Tnm = tov_sum[n];
-                    for (int m_idx = 0; m_idx < 3; ++m_idx)
-                    {
-                        if ((kFTX_LDPC_Mn[n][m_idx] - 1) == m)
-                        {
-                            Tnm -= tov[n][m_idx];
-                            break;
-                        }
-                    }
+                    float Tnm = tov_sum[n] - tov[n][nm_midx[m][n_idx]];
 
                     tanh_in[batch_count] = -Tnm / 2;
                     tanh_m[batch_count] = m;
@@ -252,32 +276,36 @@ void bp_decode(const float codeword[], int max_iters, uint8_t plain[], int* ok)
                     }
                 }
             }
-            // Flush remaining
             for (int k = 0; k < batch_count; ++k)
                 toc[tanh_m[k]][tanh_nidx[k]] = fast_tanh(tanh_in[k]);
         }
 
-        // send messages from check nodes to variable nodes
-        // and update tov_sum
+        // Send messages from check nodes to variable nodes
+        // Use row-local prefix/suffix products to get product-excluding-one in O(1)
+        for (int m = 0; m < FTX_LDPC_M; ++m)
+        {
+            int nrw = kFTX_LDPC_Num_rows[m];
+            float fwd[8], bwd[8];
+            fwd[0] = 1.0f;
+            for (int i = 0; i < nrw; ++i)
+                fwd[i + 1] = fwd[i] * toc[m][i];
+            bwd[nrw] = 1.0f;
+            for (int i = nrw - 1; i >= 0; --i)
+                bwd[i] = bwd[i + 1] * toc[m][i];
+
+            for (int n_idx = 0; n_idx < nrw; ++n_idx)
+            {
+                int n = kFTX_LDPC_Nm[m][n_idx] - 1;
+                int m_idx = nm_midx[m][n_idx];
+                float Tmn = fwd[n_idx] * bwd[n_idx + 1];
+                tov[n][m_idx] = -2 * fast_atanh(Tmn);
+            }
+        }
+
+        // Update tov_sum
         for (int n = 0; n < FTX_LDPC_N; ++n)
         {
-            float new_sum = codeword[n];
-            for (int m_idx = 0; m_idx < 3; ++m_idx)
-            {
-                int m = kFTX_LDPC_Mn[n][m_idx] - 1;
-                // for each (n, m)
-                float Tmn = 1.0f;
-                for (int n_idx = 0; n_idx < kFTX_LDPC_Num_rows[m]; ++n_idx)
-                {
-                    if ((kFTX_LDPC_Nm[m][n_idx] - 1) != n)
-                    {
-                        Tmn *= toc[m][n_idx];
-                    }
-                }
-                tov[n][m_idx] = -2 * fast_atanh(Tmn);
-                new_sum += tov[n][m_idx];
-            }
-            tov_sum[n] = new_sum;
+            tov_sum[n] = codeword[n] + tov[n][0] + tov[n][1] + tov[n][2];
         }
     }
 
