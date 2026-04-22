@@ -1,5 +1,6 @@
 #include "monitor.h"
 #include <common/common.h>
+#include <ft8/constants.h>
 
 #define LOG_LEVEL LOG_INFO
 #include <ft8/debug.h>
@@ -54,23 +55,80 @@ static void waterfall_free(ftx_waterfall_t* me)
 
 void monitor_init(monitor_t* me, const monitor_config_t* cfg)
 {
-    float slot_time = (cfg->protocol == FTX_PROTOCOL_FT4) ? FT4_SLOT_TIME : FT8_SLOT_TIME;
-    float symbol_period = (cfg->protocol == FTX_PROTOCOL_FT4) ? FT4_SYMBOL_PERIOD : FT8_SYMBOL_PERIOD;
+    float slot_time;
+    float symbol_period;
+
+    if (cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W)
+    {
+        // Look up NSPS for the given T/R period
+        int tr = (int)cfg->tr_period;
+        int nsps = 0;
+        for (int i = 0; i < FST4_NUM_TR_PERIODS; ++i)
+        {
+            if (kFST4_TR_periods[i] == tr)
+            {
+                nsps = kFST4_NSPS[i];
+                break;
+            }
+        }
+        if (nsps == 0)
+        {
+            // Default to 60s if invalid T/R period
+            nsps = 3888;
+        }
+        symbol_period = (float)nsps / 12000.0f;
+        slot_time = cfg->tr_period;
+    }
+    else if (cfg->protocol == FTX_PROTOCOL_FT4)
+    {
+        slot_time = FT4_SLOT_TIME;
+        symbol_period = FT4_SYMBOL_PERIOD;
+    }
+    else
+    {
+        slot_time = FT8_SLOT_TIME;
+        symbol_period = FT8_SYMBOL_PERIOD;
+    }
     // Compute DSP parameters that depend on the sample rate
     me->block_size = (int)(cfg->sample_rate * symbol_period); // samples corresponding to one FSK symbol
     me->subblock_size = me->block_size / cfg->time_osr;
     me->nfft = me->block_size * cfg->freq_osr;
     me->fft_norm = 2.0f / me->nfft;
-    // const int len_window = 1.8f * me->block_size; // hand-picked and optimized
+
+    // Window length: for FST4/FST4W, use block_size (1 symbol) with zero-padding
+    // to achieve frequency oversampling without spanning multiple symbols.
+    // FST4 uses a RECTANGULAR window because the tone spacing (1/Ts) matches the
+    // symbol rate, giving perfect orthogonality (sinc null at adjacent tones).
+    // A Hann window would leak -6 dB into adjacent tones, destroying tone contrast.
+    // For FT8/FT4, use the full nfft samples with Hann window (traditional approach).
+    int window_len = me->nfft;
+    if (cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W)
+    {
+        window_len = me->block_size;
+    }
+    bool use_rect_window = cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W;
 
     me->window = (float*)malloc(me->nfft * sizeof(me->window[0]));
     for (int i = 0; i < me->nfft; ++i)
     {
-        // window[i] = 1;
-        me->window[i] = me->fft_norm * hann_i(i, me->nfft);
-        // me->window[i] = blackman_i(i, me->nfft);
-        // me->window[i] = hamming_i(i, me->nfft);
-        // me->window[i] = (i < len_window) ? hann_i(i, len_window) : 0;
+        // For zero-padded mode, the window is applied to the LAST window_len samples
+        // of last_frame (the most recent data), with zero-padding before.
+        int data_offset = me->nfft - window_len;
+        if (i >= data_offset)
+        {
+            if (use_rect_window)
+            {
+                me->window[i] = me->fft_norm;
+            }
+            else
+            {
+                me->window[i] = me->fft_norm * hann_i(i - data_offset, window_len);
+            }
+        }
+        else
+        {
+            me->window[i] = 0; // zero-padding region (old data suppressed)
+        }
     }
     me->last_frame = (float*)calloc(me->nfft, sizeof(me->last_frame[0]));
 
@@ -105,7 +163,7 @@ void monitor_init(monitor_t* me, const monitor_config_t* cfg)
     const int num_bins = me->max_bin - me->min_bin;
 
     waterfall_init(&me->wf, max_blocks, num_bins, cfg->time_osr, cfg->freq_osr);
-    me->wf.protocol = cfg->protocol;
+    me->wf.desc = ftx_protocol_get_desc(cfg->protocol);
 
     me->symbol_period = symbol_period;
 
@@ -179,7 +237,6 @@ void monitor_process(monitor_t* me, const float* frame)
                 me->wf.mag[offset].phase = phase;
 #else
                 // Scale decibels to unsigned 8-bit range and clamp the value
-                // Range 0-240 covers -120..0 dB in 0.5 dB steps
                 int scaled = (int)(2 * db + 240);
                 me->wf.mag[offset] = (scaled < 0) ? 0 : ((scaled > 255) ? 255 : scaled);
 #endif
