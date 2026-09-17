@@ -9,7 +9,7 @@ COMMON_OBJ = $(patsubst %.c,$(BUILD_DIR)/%.o,$(COMMON_SRC))
 FFT_SRC  = $(wildcard fft/*.c)
 FFT_OBJ  = $(patsubst %.c,$(BUILD_DIR)/%.o,$(FFT_SRC))
 
-TARGETS  = gen_ft8 decode_ft8 test_ft8
+TARGETS  = gen_ft8 decode_ft8 test_ft8 test_monitor
 
 CPPFLAGS = -std=c++11 -I. -O3 -ggdb3 -D_GNU_SOURCE
 LDFLAGS  = -lm
@@ -32,8 +32,9 @@ all: $(TARGETS)
 clean:
 	rm -rf $(BUILD_DIR) $(BENCH_DIR) $(TARGETS) bench
 
-run_tests: test_ft8
+run_tests: test_ft8 test_monitor
 	@./test_ft8
+	@./test_monitor
 
 install:
 	$(AR) rc libft8.a $(FT8_OBJ) $(COMMON_OBJ)
@@ -46,6 +47,9 @@ decode_ft8: $(BUILD_DIR)/demo/decode_ft8.o $(FT8_OBJ) $(COMMON_OBJ) $(FFT_OBJ)
 	$(CXX) $(LDFLAGS) -o $@ $^
 
 test_ft8: $(BUILD_DIR)/test/test.o $(FT8_OBJ)
+	$(CXX) $(LDFLAGS) -o $@ $^
+
+test_monitor: $(BUILD_DIR)/test/monitor_test.o $(BUILD_DIR)/common/monitor.o $(FT8_OBJ) $(FFT_OBJ)
 	$(CXX) $(LDFLAGS) -o $@ $^
 
 bench: $(BENCH_DIR)/test/bench.o $(BENCH_FT8_OBJ)

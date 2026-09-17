@@ -8,6 +8,7 @@ extern "C"
 
 #include <ft8/decode.h>
 #include <fft/kiss_fftr.h>
+#include <stddef.h>
 
 /// Configuration options for FT4/FT8/FST4/FST4W monitor
 typedef struct
@@ -20,6 +21,17 @@ typedef struct
     ftx_protocol_t protocol; ///< Protocol: FT4, FT8, FST4, or FST4W
     float tr_period;         ///< T/R period in seconds (used for FST4/FST4W; ignored for FT4/FT8)
 } monitor_config_t;
+
+typedef struct
+{
+    size_t waterfall_bytes;
+    size_t window_bytes;
+    size_t last_frame_bytes;
+    size_t timedata_bytes;
+    size_t freqdata_bytes;
+    size_t fft_work_bytes;
+    size_t total_bytes;
+} monitor_memory_usage_t;
 
 /// FT4/FT8 monitor object that manages DSP processing of incoming audio data
 /// and prepares a waterfall object
@@ -34,6 +46,8 @@ typedef struct
     float fft_norm;      ///< FFT normalization factor
     float* window;       ///< Window function for STFT analysis (nfft samples)
     float* last_frame;   ///< Current STFT analysis frame (nfft samples)
+    kiss_fft_scalar* timedata; ///< FFT input scratch buffer (nfft samples)
+    kiss_fft_cpx* freqdata;    ///< FFT output scratch buffer (nfft / 2 + 1 samples)
     ftx_waterfall_t wf;  ///< Waterfall object
     float max_mag;       ///< Maximum detected magnitude (debug stats)
 
@@ -47,7 +61,8 @@ typedef struct
 #endif
 } monitor_t;
 
-void monitor_init(monitor_t* me, const monitor_config_t* cfg);
+bool monitor_get_memory_usage(const monitor_config_t* cfg, monitor_memory_usage_t* usage);
+bool monitor_init(monitor_t* me, const monitor_config_t* cfg);
 void monitor_reset(monitor_t* me);
 void monitor_process(monitor_t* me, const float* frame);
 void monitor_free(monitor_t* me);

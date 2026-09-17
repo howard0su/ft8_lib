@@ -5,7 +5,143 @@
 #define LOG_LEVEL LOG_INFO
 #include <ft8/debug.h>
 
+#include <limits.h>
 #include <stdlib.h>
+#include <string.h>
+
+typedef struct
+{
+    float slot_time;
+    float symbol_period;
+    int block_size;
+    int subblock_size;
+    int nfft;
+    int max_blocks;
+    int min_bin;
+    int max_bin;
+    int num_bins;
+    int block_stride;
+    size_t fft_work_size;
+    monitor_memory_usage_t memory;
+} monitor_plan_t;
+
+static bool checked_mul_size(size_t a, size_t b, size_t* result)
+{
+    if (a != 0 && b > SIZE_MAX / a)
+        return false;
+    *result = a * b;
+    return true;
+}
+
+static bool checked_add_size(size_t a, size_t b, size_t* result)
+{
+    if (b > SIZE_MAX - a)
+        return false;
+    *result = a + b;
+    return true;
+}
+
+static bool monitor_make_plan(const monitor_config_t* cfg, monitor_plan_t* plan)
+{
+    if (cfg == NULL || plan == NULL ||
+        cfg->sample_rate <= 0 || cfg->time_osr <= 0 || cfg->freq_osr <= 0 ||
+        cfg->f_min < 0 || cfg->f_max <= cfg->f_min ||
+        cfg->f_max > cfg->sample_rate / 2.0f)
+        return false;
+
+    memset(plan, 0, sizeof(*plan));
+
+    if (cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W)
+    {
+        int tr_period = (int)cfg->tr_period;
+        int nsps = 0;
+        if ((float)tr_period != cfg->tr_period)
+            return false;
+        for (int i = 0; i < FST4_NUM_TR_PERIODS; ++i)
+        {
+            if (kFST4_TR_periods[i] == tr_period)
+            {
+                nsps = kFST4_NSPS[i];
+                break;
+            }
+        }
+        if (nsps == 0)
+            return false;
+        plan->slot_time = (float)tr_period;
+        plan->symbol_period = (float)nsps / 12000.0f;
+    }
+    else if (cfg->protocol == FTX_PROTOCOL_FT4)
+    {
+        plan->slot_time = FT4_SLOT_TIME;
+        plan->symbol_period = FT4_SYMBOL_PERIOD;
+    }
+    else if (cfg->protocol == FTX_PROTOCOL_FT8)
+    {
+        plan->slot_time = FT8_SLOT_TIME;
+        plan->symbol_period = FT8_SYMBOL_PERIOD;
+    }
+    else
+    {
+        return false;
+    }
+
+    double block_size = cfg->sample_rate * (double)plan->symbol_period;
+    double nfft = block_size * cfg->freq_osr;
+    if (block_size < cfg->time_osr || block_size > INT_MAX ||
+        nfft < 2 || nfft > INT_MAX)
+        return false;
+
+    plan->block_size = (int)block_size;
+    plan->subblock_size = plan->block_size / cfg->time_osr;
+    plan->nfft = plan->block_size * cfg->freq_osr;
+    if ((plan->nfft & 1) != 0)
+        return false;
+
+    plan->max_blocks = (int)(plan->slot_time / plan->symbol_period);
+    plan->min_bin = (int)(cfg->f_min * plan->symbol_period);
+    plan->max_bin = (int)(cfg->f_max * plan->symbol_period) + 1;
+    plan->num_bins = plan->max_bin - plan->min_bin;
+    if (plan->max_blocks <= 0 || plan->num_bins <= 0)
+        return false;
+
+    size_t block_stride;
+    if (!checked_mul_size((size_t)cfg->time_osr, (size_t)cfg->freq_osr, &block_stride) ||
+        !checked_mul_size(block_stride, (size_t)plan->num_bins, &block_stride) ||
+        block_stride > INT_MAX)
+        return false;
+    plan->block_stride = (int)block_stride;
+
+    size_t waterfall_elems;
+    if (!checked_mul_size((size_t)plan->max_blocks, block_stride, &waterfall_elems) ||
+        !checked_mul_size(waterfall_elems, sizeof(WF_ELEM_T), &plan->memory.waterfall_bytes) ||
+        !checked_mul_size((size_t)plan->nfft, sizeof(float), &plan->memory.window_bytes) ||
+        !checked_mul_size((size_t)plan->nfft, sizeof(float), &plan->memory.last_frame_bytes) ||
+        !checked_mul_size((size_t)plan->nfft, sizeof(kiss_fft_scalar), &plan->memory.timedata_bytes) ||
+        !checked_mul_size((size_t)(plan->nfft / 2 + 1), sizeof(kiss_fft_cpx), &plan->memory.freqdata_bytes))
+        return false;
+
+    kiss_fftr_alloc(plan->nfft, 0, NULL, &plan->fft_work_size);
+    if (plan->fft_work_size == 0)
+        return false;
+    plan->memory.fft_work_bytes = plan->fft_work_size;
+
+    size_t total = 0;
+    const size_t sizes[] = {
+        plan->memory.waterfall_bytes,
+        plan->memory.window_bytes,
+        plan->memory.last_frame_bytes,
+        plan->memory.timedata_bytes,
+        plan->memory.freqdata_bytes,
+        plan->memory.fft_work_bytes
+    };
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i)
+    {
+        if (!checked_add_size(total, sizes[i], &total))
+            return false;
+    }
+    plan->memory.total_bytes = total;
+    return true;
+}
 
 static float hann_i(int i, int N)
 {
@@ -35,17 +171,17 @@ static float hann_i(int i, int N)
 //     return a0 - a1 * x1 + a2 * x2;
 // }
 
-static void waterfall_init(ftx_waterfall_t* me, int max_blocks, int num_bins, int time_osr, int freq_osr)
+static bool waterfall_init(ftx_waterfall_t* me, const monitor_plan_t* plan, int time_osr, int freq_osr)
 {
-    size_t mag_size = max_blocks * time_osr * freq_osr * num_bins * sizeof(me->mag[0]);
-    me->max_blocks = max_blocks;
+    me->max_blocks = plan->max_blocks;
     me->num_blocks = 0;
-    me->num_bins = num_bins;
+    me->num_bins = plan->num_bins;
     me->time_osr = time_osr;
     me->freq_osr = freq_osr;
-    me->block_stride = (time_osr * freq_osr * num_bins);
-    me->mag = (WF_ELEM_T*)malloc(mag_size);
-    LOG(LOG_DEBUG, "Waterfall size = %zu\n", mag_size);
+    me->block_stride = plan->block_stride;
+    me->mag = (WF_ELEM_T*)malloc(plan->memory.waterfall_bytes);
+    LOG(LOG_DEBUG, "Waterfall size = %zu\n", plan->memory.waterfall_bytes);
+    return me->mag != NULL;
 }
 
 static void waterfall_free(ftx_waterfall_t* me)
@@ -53,46 +189,27 @@ static void waterfall_free(ftx_waterfall_t* me)
     free(me->mag);
 }
 
-void monitor_init(monitor_t* me, const monitor_config_t* cfg)
+bool monitor_get_memory_usage(const monitor_config_t* cfg, monitor_memory_usage_t* usage)
 {
-    float slot_time;
-    float symbol_period;
+    monitor_plan_t plan;
+    if (usage == NULL || !monitor_make_plan(cfg, &plan))
+        return false;
+    *usage = plan.memory;
+    return true;
+}
 
-    if (cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W)
-    {
-        // Look up NSPS for the given T/R period
-        int tr = (int)cfg->tr_period;
-        int nsps = 0;
-        for (int i = 0; i < FST4_NUM_TR_PERIODS; ++i)
-        {
-            if (kFST4_TR_periods[i] == tr)
-            {
-                nsps = kFST4_NSPS[i];
-                break;
-            }
-        }
-        if (nsps == 0)
-        {
-            // Default to 60s if invalid T/R period
-            nsps = 3888;
-        }
-        symbol_period = (float)nsps / 12000.0f;
-        slot_time = cfg->tr_period;
-    }
-    else if (cfg->protocol == FTX_PROTOCOL_FT4)
-    {
-        slot_time = FT4_SLOT_TIME;
-        symbol_period = FT4_SYMBOL_PERIOD;
-    }
-    else
-    {
-        slot_time = FT8_SLOT_TIME;
-        symbol_period = FT8_SYMBOL_PERIOD;
-    }
+bool monitor_init(monitor_t* me, const monitor_config_t* cfg)
+{
+    monitor_plan_t plan;
+    if (me == NULL || !monitor_make_plan(cfg, &plan))
+        return false;
+
+    memset(me, 0, sizeof(*me));
+
     // Compute DSP parameters that depend on the sample rate
-    me->block_size = (int)(cfg->sample_rate * symbol_period); // samples corresponding to one FSK symbol
-    me->subblock_size = me->block_size / cfg->time_osr;
-    me->nfft = me->block_size * cfg->freq_osr;
+    me->block_size = plan.block_size;
+    me->subblock_size = plan.subblock_size;
+    me->nfft = plan.nfft;
     me->fft_norm = 2.0f / me->nfft;
 
     // Window length: for FST4/FST4W, use block_size (1 symbol) with zero-padding
@@ -108,7 +225,18 @@ void monitor_init(monitor_t* me, const monitor_config_t* cfg)
     }
     bool use_rect_window = cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W;
 
-    me->window = (float*)malloc(me->nfft * sizeof(me->window[0]));
+    me->window = (float*)malloc(plan.memory.window_bytes);
+    me->last_frame = (float*)calloc((size_t)me->nfft, sizeof(me->last_frame[0]));
+    me->timedata = (kiss_fft_scalar*)malloc(plan.memory.timedata_bytes);
+    me->freqdata = (kiss_fft_cpx*)malloc(plan.memory.freqdata_bytes);
+    me->fft_work = malloc(plan.memory.fft_work_bytes);
+    if (me->window == NULL || me->last_frame == NULL || me->timedata == NULL ||
+        me->freqdata == NULL || me->fft_work == NULL)
+    {
+        monitor_free(me);
+        return false;
+    }
+
     for (int i = 0; i < me->nfft; ++i)
     {
         // For zero-padded mode, the window is applied to the LAST window_len samples
@@ -130,15 +258,16 @@ void monitor_init(monitor_t* me, const monitor_config_t* cfg)
             me->window[i] = 0; // zero-padding region (old data suppressed)
         }
     }
-    me->last_frame = (float*)calloc(me->nfft, sizeof(me->last_frame[0]));
-
     LOG(LOG_INFO, "Block size = %d\n", me->block_size);
     LOG(LOG_INFO, "Subblock size = %d\n", me->subblock_size);
 
-    size_t fft_work_size = 0;
-    kiss_fftr_alloc(me->nfft, 0, 0, &fft_work_size);
-    me->fft_work = malloc(fft_work_size);
+    size_t fft_work_size = plan.fft_work_size;
     me->fft_cfg = kiss_fftr_alloc(me->nfft, 0, me->fft_work, &fft_work_size);
+    if (me->fft_cfg == NULL)
+    {
+        monitor_free(me);
+        return false;
+    }
 
     LOG(LOG_INFO, "N_FFT = %d\n", me->nfft);
     LOG(LOG_DEBUG, "FFT work area = %zu\n", fft_work_size);
@@ -155,30 +284,37 @@ void monitor_init(monitor_t* me, const monitor_config_t* cfg)
     LOG(LOG_DEBUG, "iFFT work area = %zu\n", ifft_work_size);
 #endif
 
-    // Allocate enough blocks to fit the entire FT8/FT4 slot in memory
-    const int max_blocks = (int)(slot_time / symbol_period);
     // Keep only FFT bins in the specified frequency range (f_min/f_max)
-    me->min_bin = (int)(cfg->f_min * symbol_period);
-    me->max_bin = (int)(cfg->f_max * symbol_period) + 1;
-    const int num_bins = me->max_bin - me->min_bin;
+    me->min_bin = plan.min_bin;
+    me->max_bin = plan.max_bin;
 
-    waterfall_init(&me->wf, max_blocks, num_bins, cfg->time_osr, cfg->freq_osr);
+    if (!waterfall_init(&me->wf, &plan, cfg->time_osr, cfg->freq_osr))
+    {
+        monitor_free(me);
+        return false;
+    }
     me->wf.desc = ftx_protocol_get_desc(cfg->protocol);
 
-    me->symbol_period = symbol_period;
+    me->symbol_period = plan.symbol_period;
 
     me->max_mag = -120.0f;
+    return true;
 }
 
 void monitor_free(monitor_t* me)
 {
+    if (me == NULL)
+        return;
     waterfall_free(&me->wf);
     free(me->fft_work);
 #ifdef WATERFALL_USE_PHASE
     free(me->ifft_work);
 #endif
+    free(me->freqdata);
+    free(me->timedata);
     free(me->last_frame);
     free(me->window);
+    memset(me, 0, sizeof(*me));
 }
 
 void monitor_reset(monitor_t* me)
@@ -200,9 +336,6 @@ void monitor_process(monitor_t* me, const float* frame)
     // Loop over block subdivisions
     for (int time_sub = 0; time_sub < me->wf.time_osr; ++time_sub)
     {
-        kiss_fft_scalar timedata[me->nfft];
-        kiss_fft_cpx freqdata[me->nfft / 2 + 1];
-
         // Shift the new data into analysis frame
         for (int pos = 0; pos < me->nfft - me->subblock_size; ++pos)
         {
@@ -217,9 +350,9 @@ void monitor_process(monitor_t* me, const float* frame)
         // Do DFT of windowed analysis frame
         for (int pos = 0; pos < me->nfft; ++pos)
         {
-            timedata[pos] = me->window[pos] * me->last_frame[pos];
+            me->timedata[pos] = me->window[pos] * me->last_frame[pos];
         }
-        kiss_fftr(me->fft_cfg, timedata, freqdata);
+        kiss_fftr(me->fft_cfg, me->timedata, me->freqdata);
 
         // Loop over possible frequency OSR offsets
         for (int freq_sub = 0; freq_sub < me->wf.freq_osr; ++freq_sub)
@@ -227,7 +360,8 @@ void monitor_process(monitor_t* me, const float* frame)
             for (int bin = me->min_bin; bin < me->max_bin; ++bin)
             {
                 int src_bin = (bin * me->wf.freq_osr) + freq_sub;
-                float mag2 = (freqdata[src_bin].i * freqdata[src_bin].i) + (freqdata[src_bin].r * freqdata[src_bin].r);
+                float mag2 = (me->freqdata[src_bin].i * me->freqdata[src_bin].i) +
+                    (me->freqdata[src_bin].r * me->freqdata[src_bin].r);
                 float db = 10.0f * log10f(1E-12f + mag2);
 
 #ifdef WATERFALL_USE_PHASE
