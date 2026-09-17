@@ -378,6 +378,81 @@ void monitor_free(monitor_t* me)
     memset(me, 0, sizeof(*me));
 }
 
+bool monitor_stream_init(monitor_stream_t* stream, monitor_t* frame, int input_sample_rate)
+{
+    if (stream == NULL || frame == NULL || frame->shared == NULL ||
+        input_sample_rate <= 0 ||
+        input_sample_rate % frame->shared->config.sample_rate != 0)
+        return false;
+
+    memset(stream, 0, sizeof(*stream));
+    stream->shared = frame->shared;
+    stream->input_sample_rate = input_sample_rate;
+    stream->decimation = input_sample_rate / frame->shared->config.sample_rate;
+    stream->block = (float*)malloc((size_t)frame->block_size * sizeof(stream->block[0]));
+    if (stream->block == NULL)
+    {
+        memset(stream, 0, sizeof(*stream));
+        return false;
+    }
+    return monitor_stream_set_frame(stream, frame);
+}
+
+bool monitor_stream_set_frame(monitor_stream_t* stream, monitor_t* frame)
+{
+    if (stream == NULL || stream->block == NULL || frame == NULL ||
+        frame->shared != stream->shared)
+        return false;
+
+    stream->frame = frame;
+    stream->block_pos = 0;
+    stream->decimation_phase = 0;
+    monitor_reset(frame);
+    return true;
+}
+
+int monitor_stream_process_i16(monitor_stream_t* stream, const int16_t* samples, int num_samples)
+{
+    if (stream == NULL || stream->frame == NULL || stream->block == NULL ||
+        samples == NULL || num_samples < 0)
+        return -1;
+
+    int blocks_processed = 0;
+    for (int i = 0; i < num_samples; ++i)
+    {
+        if (stream->decimation_phase == 0)
+        {
+            stream->block[stream->block_pos++] = samples[i] / 32768.0f;
+            if (stream->block_pos == stream->frame->block_size)
+            {
+                monitor_process(stream->frame, stream->block);
+                stream->block_pos = 0;
+                ++blocks_processed;
+            }
+        }
+
+        ++stream->decimation_phase;
+        if (stream->decimation_phase == stream->decimation)
+            stream->decimation_phase = 0;
+    }
+    return blocks_processed;
+}
+
+size_t monitor_stream_memory_usage(const monitor_stream_t* stream)
+{
+    if (stream == NULL || stream->frame == NULL || stream->block == NULL)
+        return 0;
+    return (size_t)stream->frame->block_size * sizeof(stream->block[0]);
+}
+
+void monitor_stream_free(monitor_stream_t* stream)
+{
+    if (stream == NULL)
+        return;
+    free(stream->block);
+    memset(stream, 0, sizeof(*stream));
+}
+
 // Compute FFT magnitudes (log wf) for a frame in the signal and update waterfall data
 void monitor_process(monitor_t* me, const float* frame)
 {

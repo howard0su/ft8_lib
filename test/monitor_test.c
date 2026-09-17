@@ -1,5 +1,6 @@
 #include <stdbool.h>
 #include <stdint.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +32,20 @@ static monitor_config_t make_config(ftx_protocol_t protocol, float tr_period)
         .time_osr = 4,
         .freq_osr = 2,
         .protocol = protocol,
+        .tr_period = tr_period
+    };
+    return cfg;
+}
+
+static monitor_config_t make_web888_fst4w_config(float tr_period)
+{
+    monitor_config_t cfg = {
+        .f_min = 600,
+        .f_max = 900,
+        .sample_rate = 6000,
+        .time_osr = 4,
+        .freq_osr = 2,
+        .protocol = FTX_PROTOCOL_FST4W,
         .tr_period = tr_period
     };
     return cfg;
@@ -89,17 +104,17 @@ static bool test_fst4w_period_memory(void)
 
 static bool test_web888_memory_budget(void)
 {
-    printf("web-888 FST4W memory model (2 monitor frames, 128 MiB reserve):\n");
+    printf("web-888 FST4W memory model (shared DSP, 2 frames, streaming 12k->6k):\n");
 
     for (int i = 0; i < FST4_NUM_TR_PERIODS; ++i)
     {
         int period = kFST4_TR_periods[i];
-        monitor_config_t cfg = make_config(FTX_PROTOCOL_FST4W, (float)period);
+        monitor_config_t cfg = make_web888_fst4w_config((float)period);
         monitor_memory_usage_t usage;
         CHECK(monitor_get_memory_usage(&cfg, &usage));
 
-        size_t sample_bytes = (size_t)period * (size_t)cfg.sample_rate * sizeof(float);
-        size_t per_channel = sample_bytes + WEB888_FRAME_COUNT * usage.total_bytes;
+        size_t stream_bytes = (size_t)lround(cfg.sample_rate * ((float)kFST4_NSPS[i] / 12000.0f)) * sizeof(float);
+        size_t per_channel = stream_bytes + usage.shared_bytes + WEB888_FRAME_COUNT * usage.frame_bytes;
         size_t available = WEB888_MEMORY_BUDGET - WEB888_MEMORY_RESERVE;
         size_t max_channels = available / per_channel;
 
@@ -109,9 +124,55 @@ static bool test_web888_memory_budget(void)
         CHECK(per_channel < WEB888_MEMORY_BUDGET);
         CHECK(max_channels >= 1);
         if (period == 1800)
-            CHECK(max_channels <= 2);
+            CHECK(per_channel <= 12u * MIB);
     }
 
+    return true;
+}
+
+static bool test_streaming_decimation(void)
+{
+    monitor_config_t cfg = make_web888_fst4w_config(15);
+    monitor_shared_t direct_shared;
+    monitor_shared_t stream_shared;
+    monitor_t direct_frame;
+    monitor_t stream_frame;
+    monitor_stream_t stream;
+
+    CHECK(monitor_shared_init(&direct_shared, &cfg));
+    CHECK(monitor_shared_init(&stream_shared, &cfg));
+    CHECK(monitor_frame_init(&direct_frame, &direct_shared));
+    CHECK(monitor_frame_init(&stream_frame, &stream_shared));
+    CHECK(monitor_stream_init(&stream, &stream_frame, 12000));
+    CHECK(stream.decimation == 2);
+
+    int input_count = direct_frame.block_size * stream.decimation;
+    int16_t* input = (int16_t*)malloc((size_t)input_count * sizeof(input[0]));
+    float* direct = (float*)malloc((size_t)direct_frame.block_size * sizeof(direct[0]));
+    CHECK(input != NULL);
+    CHECK(direct != NULL);
+
+    for (int i = 0; i < input_count; ++i)
+        input[i] = (int16_t)lround(16000.0 * sin(2.0 * M_PI * 750.0 * i / 12000.0));
+    for (int i = 0; i < direct_frame.block_size; ++i)
+        direct[i] = input[i * stream.decimation] / 32768.0f;
+
+    monitor_process(&direct_frame, direct);
+    int split = input_count / 3;
+    CHECK(monitor_stream_process_i16(&stream, input, split) == 0);
+    CHECK(monitor_stream_process_i16(&stream, input + split, input_count - split) == 1);
+    CHECK(direct_frame.wf.num_blocks == 1);
+    CHECK(stream_frame.wf.num_blocks == 1);
+    CHECK(memcmp(direct_frame.wf.mag, stream_frame.wf.mag,
+        (size_t)direct_frame.wf.block_stride * sizeof(direct_frame.wf.mag[0])) == 0);
+
+    free(direct);
+    free(input);
+    monitor_stream_free(&stream);
+    monitor_free(&stream_frame);
+    monitor_free(&direct_frame);
+    monitor_shared_free(&stream_shared);
+    monitor_shared_free(&direct_shared);
     return true;
 }
 
@@ -162,6 +223,7 @@ int main(void)
     CHECK(test_fst4w_period_memory());
     CHECK(test_web888_memory_budget());
     CHECK(test_web888_monitor_lifecycle());
+    CHECK(test_streaming_decimation());
     printf("Monitor integration tests OK\n");
     return 0;
 }

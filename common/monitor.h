@@ -69,6 +69,19 @@ typedef struct
     bool owns_shared;
 } monitor_t;
 
+/// Chunked input adapter for a monitor whose input has already been band-limited
+/// below the monitor sample rate's Nyquist frequency.
+typedef struct
+{
+    monitor_shared_t* shared;
+    monitor_t* frame;
+    float* block;
+    int block_pos;
+    int input_sample_rate;
+    int decimation;
+    int decimation_phase;
+} monitor_stream_t;
+
 bool monitor_get_memory_usage(const monitor_config_t* cfg, monitor_memory_usage_t* usage);
 bool monitor_shared_init(monitor_shared_t* shared, const monitor_config_t* cfg);
 void monitor_shared_reset(monitor_shared_t* shared);
@@ -78,6 +91,12 @@ bool monitor_init(monitor_t* me, const monitor_config_t* cfg);
 void monitor_reset(monitor_t* me);
 void monitor_process(monitor_t* me, const float* frame);
 void monitor_free(monitor_t* me);
+
+bool monitor_stream_init(monitor_stream_t* stream, monitor_t* frame, int input_sample_rate);
+bool monitor_stream_set_frame(monitor_stream_t* stream, monitor_t* frame);
+int monitor_stream_process_i16(monitor_stream_t* stream, const int16_t* samples, int num_samples);
+size_t monitor_stream_memory_usage(const monitor_stream_t* stream);
+void monitor_stream_free(monitor_stream_t* stream);
 
 #ifdef WATERFALL_USE_PHASE
 void monitor_resynth(const monitor_t* me, const ftx_candidate_t* candidate, float* signal);
