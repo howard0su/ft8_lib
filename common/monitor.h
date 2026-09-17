@@ -30,38 +30,50 @@ typedef struct
     size_t timedata_bytes;
     size_t freqdata_bytes;
     size_t fft_work_bytes;
+    size_t shared_bytes;
+    size_t frame_bytes;
     size_t total_bytes;
 } monitor_memory_usage_t;
 
-/// FT4/FT8 monitor object that manages DSP processing of incoming audio data
-/// and prepares a waterfall object
 typedef struct
 {
-    float symbol_period; ///< FT4/FT8 symbol period in seconds
-    int min_bin;         ///< First FFT bin in the frequency range (begin)
-    int max_bin;         ///< First FFT bin outside the frequency range (end)
-    int block_size;      ///< Number of samples per symbol (block)
-    int subblock_size;   ///< Analysis shift size (number of samples)
-    int nfft;            ///< FFT size
-    float fft_norm;      ///< FFT normalization factor
-    float* window;       ///< Window function for STFT analysis (nfft samples)
-    float* last_frame;   ///< Current STFT analysis frame (nfft samples)
-    kiss_fft_scalar* timedata; ///< FFT input scratch buffer (nfft samples)
-    kiss_fft_cpx* freqdata;    ///< FFT output scratch buffer (nfft / 2 + 1 samples)
-    ftx_waterfall_t wf;  ///< Waterfall object
-    float max_mag;       ///< Maximum detected magnitude (debug stats)
+    monitor_config_t config;
+    int block_size;
+    int subblock_size;
+    int nfft;
+    float fft_norm;
+    float* window;
+    float* last_frame;
+    kiss_fft_scalar* timedata;
+    kiss_fft_cpx* freqdata;
 
-    // KISS FFT housekeeping variables
-    void* fft_work;        ///< Work area required by Kiss FFT
-    kiss_fftr_cfg fft_cfg; ///< Kiss FFT housekeeping object
+    void* fft_work;
+    kiss_fftr_cfg fft_cfg;
 #ifdef WATERFALL_USE_PHASE
-    int nifft;             ///< iFFT size
-    void* ifft_work;       ///< Work area required by inverse Kiss FFT
-    kiss_fft_cfg ifft_cfg; ///< Inverse Kiss FFT housekeeping object
+    int nifft;
+    void* ifft_work;
+    kiss_fft_cfg ifft_cfg;
 #endif
+} monitor_shared_t;
+
+/// One independently decodable waterfall frame using shared FFT processing state.
+typedef struct
+{
+    float symbol_period;
+    int min_bin;
+    int max_bin;
+    int block_size;
+    ftx_waterfall_t wf;
+    float max_mag;
+    monitor_shared_t* shared;
+    bool owns_shared;
 } monitor_t;
 
 bool monitor_get_memory_usage(const monitor_config_t* cfg, monitor_memory_usage_t* usage);
+bool monitor_shared_init(monitor_shared_t* shared, const monitor_config_t* cfg);
+void monitor_shared_reset(monitor_shared_t* shared);
+void monitor_shared_free(monitor_shared_t* shared);
+bool monitor_frame_init(monitor_t* me, monitor_shared_t* shared);
 bool monitor_init(monitor_t* me, const monitor_config_t* cfg);
 void monitor_reset(monitor_t* me);
 void monitor_process(monitor_t* me, const float* frame);

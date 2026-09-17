@@ -80,7 +80,7 @@ static bool test_fst4w_period_memory(void)
         monitor_t mon;
         CHECK(monitor_init(&mon, &cfg));
         CHECK(mon.block_size == kFST4_NSPS[i]);
-        CHECK(mon.subblock_size * cfg.time_osr == mon.block_size);
+        CHECK(mon.shared->subblock_size * cfg.time_osr == mon.block_size);
         monitor_free(&mon);
     }
 
@@ -118,18 +118,21 @@ static bool test_web888_memory_budget(void)
 static bool test_web888_monitor_lifecycle(void)
 {
     monitor_config_t cfg = make_config(FTX_PROTOCOL_FST4W, 15);
+    monitor_shared_t shared;
     monitor_t frames[WEB888_FRAME_COUNT];
     memset(frames, 0, sizeof(frames));
 
+    CHECK(monitor_shared_init(&shared, &cfg));
     for (size_t i = 0; i < WEB888_FRAME_COUNT; ++i)
     {
-        CHECK(monitor_init(&frames[i], &cfg));
+        CHECK(monitor_frame_init(&frames[i], &shared));
         CHECK(frames[i].wf.desc != NULL);
         CHECK(frames[i].wf.desc->protocol == FTX_PROTOCOL_FST4W);
         CHECK(frames[i].wf.mag != NULL);
-        CHECK(frames[i].timedata != NULL);
-        CHECK(frames[i].freqdata != NULL);
+        CHECK(frames[i].shared == &shared);
     }
+    CHECK(shared.timedata != NULL);
+    CHECK(shared.freqdata != NULL);
 
     float* samples = (float*)calloc((size_t)frames[0].block_size, sizeof(float));
     CHECK(samples != NULL);
@@ -143,10 +146,12 @@ static bool test_web888_monitor_lifecycle(void)
     {
         monitor_free(&frames[i]);
         CHECK(frames[i].wf.mag == NULL);
-        CHECK(frames[i].timedata == NULL);
-        CHECK(frames[i].freqdata == NULL);
+        CHECK(frames[i].shared == NULL);
         monitor_free(&frames[i]);
     }
+    monitor_shared_free(&shared);
+    CHECK(shared.timedata == NULL);
+    CHECK(shared.freqdata == NULL);
 
     return true;
 }

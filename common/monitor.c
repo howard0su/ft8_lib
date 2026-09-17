@@ -127,21 +127,23 @@ static bool monitor_make_plan(const monitor_config_t* cfg, monitor_plan_t* plan)
         return false;
     plan->memory.fft_work_bytes = plan->fft_work_size;
 
-    size_t total = 0;
-    const size_t sizes[] = {
-        plan->memory.waterfall_bytes,
+    size_t shared = 0;
+    const size_t shared_sizes[] = {
         plan->memory.window_bytes,
         plan->memory.last_frame_bytes,
         plan->memory.timedata_bytes,
         plan->memory.freqdata_bytes,
         plan->memory.fft_work_bytes
     };
-    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); ++i)
+    for (size_t i = 0; i < sizeof(shared_sizes) / sizeof(shared_sizes[0]); ++i)
     {
-        if (!checked_add_size(total, sizes[i], &total))
+        if (!checked_add_size(shared, shared_sizes[i], &shared))
             return false;
     }
-    plan->memory.total_bytes = total;
+    plan->memory.shared_bytes = shared;
+    plan->memory.frame_bytes = plan->memory.waterfall_bytes;
+    if (!checked_add_size(shared, plan->memory.frame_bytes, &plan->memory.total_bytes))
+        return false;
     return true;
 }
 
@@ -200,19 +202,20 @@ bool monitor_get_memory_usage(const monitor_config_t* cfg, monitor_memory_usage_
     return true;
 }
 
-bool monitor_init(monitor_t* me, const monitor_config_t* cfg)
+bool monitor_shared_init(monitor_shared_t* shared, const monitor_config_t* cfg)
 {
     monitor_plan_t plan;
-    if (me == NULL || !monitor_make_plan(cfg, &plan))
+    if (shared == NULL || !monitor_make_plan(cfg, &plan))
         return false;
 
-    memset(me, 0, sizeof(*me));
+    memset(shared, 0, sizeof(*shared));
+    shared->config = *cfg;
 
     // Compute DSP parameters that depend on the sample rate
-    me->block_size = plan.block_size;
-    me->subblock_size = plan.subblock_size;
-    me->nfft = plan.nfft;
-    me->fft_norm = 2.0f / me->nfft;
+    shared->block_size = plan.block_size;
+    shared->subblock_size = plan.subblock_size;
+    shared->nfft = plan.nfft;
+    shared->fft_norm = 2.0f / shared->nfft;
 
     // Window length: for FST4/FST4W, use block_size (1 symbol) with zero-padding
     // to achieve frequency oversampling without spanning multiple symbols.
@@ -220,87 +223,146 @@ bool monitor_init(monitor_t* me, const monitor_config_t* cfg)
     // symbol rate, giving perfect orthogonality (sinc null at adjacent tones).
     // A Hann window would leak -6 dB into adjacent tones, destroying tone contrast.
     // For FT8/FT4, use the full nfft samples with Hann window (traditional approach).
-    int window_len = me->nfft;
+    int window_len = shared->nfft;
     if (cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W)
     {
-        window_len = me->block_size;
+        window_len = shared->block_size;
     }
     bool use_rect_window = cfg->protocol == FTX_PROTOCOL_FST4 || cfg->protocol == FTX_PROTOCOL_FST4W;
 
-    me->window = (float*)malloc(plan.memory.window_bytes);
-    me->last_frame = (float*)calloc((size_t)me->nfft, sizeof(me->last_frame[0]));
-    me->timedata = (kiss_fft_scalar*)malloc(plan.memory.timedata_bytes);
-    me->freqdata = (kiss_fft_cpx*)malloc(plan.memory.freqdata_bytes);
-    me->fft_work = malloc(plan.memory.fft_work_bytes);
-    if (me->window == NULL || me->last_frame == NULL || me->timedata == NULL ||
-        me->freqdata == NULL || me->fft_work == NULL)
+    shared->window = (float*)malloc(plan.memory.window_bytes);
+    shared->last_frame = (float*)calloc((size_t)shared->nfft, sizeof(shared->last_frame[0]));
+    shared->timedata = (kiss_fft_scalar*)malloc(plan.memory.timedata_bytes);
+    shared->freqdata = (kiss_fft_cpx*)malloc(plan.memory.freqdata_bytes);
+    shared->fft_work = malloc(plan.memory.fft_work_bytes);
+    if (shared->window == NULL || shared->last_frame == NULL || shared->timedata == NULL ||
+        shared->freqdata == NULL || shared->fft_work == NULL)
     {
-        monitor_free(me);
+        monitor_shared_free(shared);
         return false;
     }
 
-    for (int i = 0; i < me->nfft; ++i)
+    for (int i = 0; i < shared->nfft; ++i)
     {
         // For zero-padded mode, the window is applied to the LAST window_len samples
         // of last_frame (the most recent data), with zero-padding before.
-        int data_offset = me->nfft - window_len;
+        int data_offset = shared->nfft - window_len;
         if (i >= data_offset)
         {
             if (use_rect_window)
             {
-                me->window[i] = me->fft_norm;
+                shared->window[i] = shared->fft_norm;
             }
             else
             {
-                me->window[i] = me->fft_norm * hann_i(i - data_offset, window_len);
+                shared->window[i] = shared->fft_norm * hann_i(i - data_offset, window_len);
             }
         }
         else
         {
-            me->window[i] = 0; // zero-padding region (old data suppressed)
+            shared->window[i] = 0;
         }
     }
-    LOG(LOG_INFO, "Block size = %d\n", me->block_size);
-    LOG(LOG_INFO, "Subblock size = %d\n", me->subblock_size);
+    LOG(LOG_INFO, "Block size = %d\n", shared->block_size);
+    LOG(LOG_INFO, "Subblock size = %d\n", shared->subblock_size);
 
     size_t fft_work_size = plan.fft_work_size;
-    me->fft_cfg = kiss_fftr_alloc(me->nfft, 0, me->fft_work, &fft_work_size);
-    if (me->fft_cfg == NULL)
+    shared->fft_cfg = kiss_fftr_alloc(shared->nfft, 0, shared->fft_work, &fft_work_size);
+    if (shared->fft_cfg == NULL)
     {
-        monitor_free(me);
+        monitor_shared_free(shared);
         return false;
     }
 
-    LOG(LOG_INFO, "N_FFT = %d\n", me->nfft);
+    LOG(LOG_INFO, "N_FFT = %d\n", shared->nfft);
     LOG(LOG_DEBUG, "FFT work area = %zu\n", fft_work_size);
 
 #ifdef WATERFALL_USE_PHASE
-    me->nifft = 64; // Gives 200 Hz sample rate for FT8 (160ms symbol period)
+    shared->nifft = 64;
 
     size_t ifft_work_size = 0;
-    kiss_fft_alloc(me->nifft, 1, 0, &ifft_work_size);
-    me->ifft_work = malloc(ifft_work_size);
-    me->ifft_cfg = kiss_fft_alloc(me->nifft, 1, me->ifft_work, &ifft_work_size);
+    kiss_fft_alloc(shared->nifft, 1, 0, &ifft_work_size);
+    shared->ifft_work = malloc(ifft_work_size);
+    shared->ifft_cfg = kiss_fft_alloc(shared->nifft, 1, shared->ifft_work, &ifft_work_size);
+    if (shared->ifft_work == NULL || shared->ifft_cfg == NULL)
+    {
+        monitor_shared_free(shared);
+        return false;
+    }
 
-    LOG(LOG_INFO, "N_iFFT = %d\n", me->nifft);
+    LOG(LOG_INFO, "N_iFFT = %d\n", shared->nifft);
     LOG(LOG_DEBUG, "iFFT work area = %zu\n", ifft_work_size);
 #endif
+    return true;
+}
 
-    // Keep only FFT bins in the specified frequency range (f_min/f_max)
+void monitor_shared_reset(monitor_shared_t* shared)
+{
+    if (shared != NULL && shared->last_frame != NULL)
+        memset(shared->last_frame, 0, (size_t)shared->nfft * sizeof(shared->last_frame[0]));
+}
+
+void monitor_shared_free(monitor_shared_t* shared)
+{
+    if (shared == NULL)
+        return;
+    free(shared->fft_work);
+#ifdef WATERFALL_USE_PHASE
+    free(shared->ifft_work);
+#endif
+    free(shared->freqdata);
+    free(shared->timedata);
+    free(shared->last_frame);
+    free(shared->window);
+    memset(shared, 0, sizeof(*shared));
+}
+
+bool monitor_frame_init(monitor_t* me, monitor_shared_t* shared)
+{
+    monitor_plan_t plan;
+    if (me == NULL || shared == NULL || shared->fft_cfg == NULL ||
+        !monitor_make_plan(&shared->config, &plan))
+        return false;
+
+    memset(me, 0, sizeof(*me));
+    me->shared = shared;
+    me->block_size = plan.block_size;
     me->min_bin = plan.min_bin;
     me->max_bin = plan.max_bin;
 
-    if (!waterfall_init(&me->wf, &plan, cfg->time_osr, cfg->freq_osr))
+    if (!waterfall_init(&me->wf, &plan, shared->config.time_osr, shared->config.freq_osr))
     {
-        monitor_free(me);
+        memset(me, 0, sizeof(*me));
         return false;
     }
-    me->wf.desc = ftx_protocol_get_desc(cfg->protocol);
-
+    me->wf.desc = ftx_protocol_get_desc(shared->config.protocol);
     me->symbol_period = plan.symbol_period;
-
     me->max_mag = -120.0f;
     return true;
+}
+
+bool monitor_init(monitor_t* me, const monitor_config_t* cfg)
+{
+    if (me == NULL)
+        return false;
+    monitor_shared_t* shared = (monitor_shared_t*)malloc(sizeof(*shared));
+    if (shared == NULL)
+        return false;
+    if (!monitor_shared_init(shared, cfg) || !monitor_frame_init(me, shared))
+    {
+        monitor_shared_free(shared);
+        free(shared);
+        return false;
+    }
+    me->owns_shared = true;
+    return true;
+}
+
+void monitor_reset(monitor_t* me)
+{
+    me->wf.num_blocks = 0;
+    me->max_mag = -120.0f;
+    monitor_shared_reset(me->shared);
 }
 
 void monitor_free(monitor_t* me)
@@ -308,28 +370,20 @@ void monitor_free(monitor_t* me)
     if (me == NULL)
         return;
     waterfall_free(&me->wf);
-    free(me->fft_work);
-#ifdef WATERFALL_USE_PHASE
-    free(me->ifft_work);
-#endif
-    free(me->freqdata);
-    free(me->timedata);
-    free(me->last_frame);
-    free(me->window);
+    if (me->owns_shared)
+    {
+        monitor_shared_free(me->shared);
+        free(me->shared);
+    }
     memset(me, 0, sizeof(*me));
-}
-
-void monitor_reset(monitor_t* me)
-{
-    me->wf.num_blocks = 0;
-    me->max_mag = -120.0f;
 }
 
 // Compute FFT magnitudes (log wf) for a frame in the signal and update waterfall data
 void monitor_process(monitor_t* me, const float* frame)
 {
+    monitor_shared_t* shared = me->shared;
     // Check if we can still store more waterfall data
-    if (me->wf.num_blocks >= me->wf.max_blocks)
+    if (shared == NULL || me->wf.num_blocks >= me->wf.max_blocks)
         return;
 
     int offset = me->wf.num_blocks * me->wf.block_stride;
@@ -339,22 +393,22 @@ void monitor_process(monitor_t* me, const float* frame)
     for (int time_sub = 0; time_sub < me->wf.time_osr; ++time_sub)
     {
         // Shift the new data into analysis frame
-        for (int pos = 0; pos < me->nfft - me->subblock_size; ++pos)
+        for (int pos = 0; pos < shared->nfft - shared->subblock_size; ++pos)
         {
-            me->last_frame[pos] = me->last_frame[pos + me->subblock_size];
+            shared->last_frame[pos] = shared->last_frame[pos + shared->subblock_size];
         }
-        for (int pos = me->nfft - me->subblock_size; pos < me->nfft; ++pos)
+        for (int pos = shared->nfft - shared->subblock_size; pos < shared->nfft; ++pos)
         {
-            me->last_frame[pos] = frame[frame_pos];
+            shared->last_frame[pos] = frame[frame_pos];
             ++frame_pos;
         }
 
         // Do DFT of windowed analysis frame
-        for (int pos = 0; pos < me->nfft; ++pos)
+        for (int pos = 0; pos < shared->nfft; ++pos)
         {
-            me->timedata[pos] = me->window[pos] * me->last_frame[pos];
+            shared->timedata[pos] = shared->window[pos] * shared->last_frame[pos];
         }
-        kiss_fftr(me->fft_cfg, me->timedata, me->freqdata);
+        kiss_fftr(shared->fft_cfg, shared->timedata, shared->freqdata);
 
         // Loop over possible frequency OSR offsets
         for (int freq_sub = 0; freq_sub < me->wf.freq_osr; ++freq_sub)
@@ -362,8 +416,8 @@ void monitor_process(monitor_t* me, const float* frame)
             for (int bin = me->min_bin; bin < me->max_bin; ++bin)
             {
                 int src_bin = (bin * me->wf.freq_osr) + freq_sub;
-                float mag2 = (me->freqdata[src_bin].i * me->freqdata[src_bin].i) +
-                    (me->freqdata[src_bin].r * me->freqdata[src_bin].r);
+                float mag2 = (shared->freqdata[src_bin].i * shared->freqdata[src_bin].i) +
+                    (shared->freqdata[src_bin].r * shared->freqdata[src_bin].r);
                 float db = 10.0f * log10f(1E-12f + mag2);
 
 #ifdef WATERFALL_USE_PHASE
