@@ -1010,8 +1010,8 @@ ftx_message_rc_t fst4w_message_decode(const ftx_message_t* msg, ftx_callsign_has
     const uint8_t* p = msg->payload;
 
     // Determine WSPR subtype from bits 48-49
-    uint8_t j2a = (p[6] >> 1) & 1; // bit 48
-    uint8_t j2b = p[6] & 1;        // bit 49
+    uint8_t j2a = (p[6] >> 7) & 1; // bit 48
+    uint8_t j2b = (p[6] >> 6) & 1; // bit 49
 
     int itype = 2; // default: Type 2 (prefix/suffix)
     if (j2b == 0 && j2a == 0)

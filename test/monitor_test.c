@@ -7,9 +7,13 @@
 
 #include "common/monitor.h"
 #include "ft8/constants.h"
+#include "ft8/decode.h"
+#include "ft8/encode.h"
+#include "ft8/message.h"
 
 #define MIB (1024u * 1024u)
 #define WEB888_FRAME_COUNT 2u
+#define WEB888_STRESS_CHANNELS 8u
 #define WEB888_MEMORY_BUDGET (512u * MIB)
 #define WEB888_MEMORY_RESERVE (128u * MIB)
 
@@ -176,6 +180,147 @@ static bool test_streaming_decimation(void)
     return true;
 }
 
+static void set_bits(uint8_t* payload, int offset, int count, uint32_t value)
+{
+    for (int i = 0; i < count; ++i)
+    {
+        if ((value & (1u << (count - 1 - i))) != 0)
+            payload[(offset + i) / 8] |= (uint8_t)(1u << (7 - ((offset + i) % 8)));
+    }
+}
+
+static bool test_streaming_fst4w_decode(void)
+{
+    monitor_config_t cfg = make_web888_fst4w_config(15);
+    monitor_shared_t shared;
+    monitor_t frame;
+    monitor_stream_t stream;
+
+    CHECK(monitor_shared_init(&shared, &cfg));
+    CHECK(monitor_frame_init(&frame, &shared));
+    CHECK(monitor_stream_init(&stream, &frame, 12000));
+
+    uint8_t payload[10] = { 0 };
+    const uint32_t n28_k1jt = 2063592u + 4194304u + 3964113u;
+    set_bits(payload, 0, 28, n28_k1jt);
+    set_bits(payload, 28, 15, 10320u);
+    set_bits(payload, 43, 5, 11u);
+
+    uint8_t tones[FST4_NN];
+    fst4w_encode(payload, tones);
+
+    const int input_samples = 15 * 12000;
+    const int samples_per_symbol = 720;
+    int16_t* input = (int16_t*)malloc((size_t)input_samples * sizeof(input[0]));
+    CHECK(input != NULL);
+
+    double phase = 0;
+    for (int i = 0; i < input_samples; ++i)
+    {
+        int symbol = i / samples_per_symbol;
+        float frequency = 750.0f;
+        if (symbol < FST4_NN)
+            frequency += tones[symbol] / frame.symbol_period;
+        input[i] = (int16_t)lround(24000.0 * sin(phase));
+        phase = fmod(phase + 2.0 * M_PI * frequency / 12000.0, 2.0 * M_PI);
+    }
+
+    for (int pos = 0; pos < input_samples;)
+    {
+        int count = 4093;
+        if (count > input_samples - pos)
+            count = input_samples - pos;
+        CHECK(monitor_stream_process_i16(&stream, input + pos, count) >= 0);
+        pos += count;
+    }
+    free(input);
+
+    CHECK(frame.wf.num_blocks == frame.wf.max_blocks);
+
+    ftx_candidate_t candidate = {
+        .score = 0,
+        .time_offset = 0,
+        .freq_offset = (int16_t)((int)(750.0f * frame.symbol_period) - frame.min_bin),
+        .time_sub = 3,
+        .freq_sub = 0
+    };
+    const ftx_protocol_desc_t* desc = frame.wf.desc;
+    candidate.score = (int16_t)desc->sync_score(&frame.wf, &candidate);
+    CHECK(candidate.score > 10);
+
+    ftx_message_t message;
+    ftx_decode_status_t status;
+    CHECK(ftx_decode_candidate(&frame.wf, &candidate, desc->max_ldpc_iterations, &message, &status));
+
+    char text[FTX_MAX_MESSAGE_LENGTH];
+    CHECK(fst4w_message_decode(&message, NULL, text) == FTX_MESSAGE_RC_OK);
+    if (strcmp(text, "K1JT FN20 37") != 0)
+    {
+        fprintf(stderr, "Decoded FST4W text: '%s'\n", text);
+        fprintf(stderr, "Payload expected/decoded:");
+        for (int i = 0; i < 10; ++i)
+            fprintf(stderr, " %02x/%02x", payload[i], message.payload[i]);
+        fprintf(stderr, "\n");
+    }
+    CHECK(strcmp(text, "K1JT FN20 37") == 0);
+
+    monitor_stream_free(&stream);
+    monitor_free(&frame);
+    monitor_shared_free(&shared);
+    return true;
+}
+
+static bool test_web888_concurrent_allocation(void)
+{
+    monitor_config_t cfg = make_web888_fst4w_config(1800);
+    monitor_memory_usage_t usage;
+    CHECK(monitor_get_memory_usage(&cfg, &usage));
+
+    monitor_shared_t shared[WEB888_STRESS_CHANNELS];
+    monitor_t frames[WEB888_STRESS_CHANNELS][WEB888_FRAME_COUNT];
+    monitor_stream_t streams[WEB888_STRESS_CHANNELS];
+    memset(shared, 0, sizeof(shared));
+    memset(frames, 0, sizeof(frames));
+    memset(streams, 0, sizeof(streams));
+
+    size_t per_channel = usage.shared_bytes + WEB888_FRAME_COUNT * usage.frame_bytes +
+        (size_t)(kFST4_NSPS[FST4_NUM_TR_PERIODS - 1] / 2) * sizeof(float);
+    CHECK(per_channel * WEB888_STRESS_CHANNELS < 96u * MIB);
+
+    for (size_t channel = 0; channel < WEB888_STRESS_CHANNELS; ++channel)
+    {
+        CHECK(monitor_shared_init(&shared[channel], &cfg));
+        for (size_t frame = 0; frame < WEB888_FRAME_COUNT; ++frame)
+            CHECK(monitor_frame_init(&frames[channel][frame], &shared[channel]));
+        CHECK(monitor_stream_init(&streams[channel], &frames[channel][0], 12000));
+        CHECK(monitor_stream_memory_usage(&streams[channel]) ==
+            (size_t)frames[channel][0].block_size * sizeof(float));
+    }
+
+    int input_count = frames[0][0].block_size * streams[0].decimation;
+    int16_t* input = (int16_t*)malloc((size_t)input_count * sizeof(input[0]));
+    CHECK(input != NULL);
+    for (int i = 0; i < input_count; ++i)
+        input[i] = (int16_t)lround(12000.0 * sin(2.0 * M_PI * 750.0 * i / 12000.0));
+
+    for (size_t channel = 0; channel < WEB888_STRESS_CHANNELS; ++channel)
+    {
+        CHECK(monitor_stream_process_i16(&streams[channel], input, input_count) == 1);
+        CHECK(frames[channel][0].wf.num_blocks == 1);
+    }
+    free(input);
+
+    for (size_t channel = 0; channel < WEB888_STRESS_CHANNELS; ++channel)
+    {
+        monitor_stream_free(&streams[channel]);
+        for (size_t frame = 0; frame < WEB888_FRAME_COUNT; ++frame)
+            monitor_free(&frames[channel][frame]);
+        monitor_shared_free(&shared[channel]);
+    }
+
+    return true;
+}
+
 static bool test_web888_monitor_lifecycle(void)
 {
     monitor_config_t cfg = make_config(FTX_PROTOCOL_FST4W, 15);
@@ -224,6 +369,8 @@ int main(void)
     CHECK(test_web888_memory_budget());
     CHECK(test_web888_monitor_lifecycle());
     CHECK(test_streaming_decimation());
+    CHECK(test_streaming_fst4w_decode());
+    CHECK(test_web888_concurrent_allocation());
     printf("Monitor integration tests OK\n");
     return 0;
 }

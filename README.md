@@ -86,21 +86,31 @@ Key implementation details:
 
 ### Memory-constrained integration
 
-`monitor_get_memory_usage()` reports the heap required by one monitor before it is initialized. Integrations should include their sample buffers and number of rotating monitor frames when enforcing a process-wide memory budget. `monitor_init()` returns `false` for unsupported T/R periods, invalid configurations, or allocation failures.
+`monitor_get_memory_usage()` reports separate shared-DSP and per-waterfall-frame memory before initialization. `monitor_shared_init()` creates one FFT processor that can be used by multiple `monitor_frame_init()` waterfall frames. The original `monitor_init()` remains available for integrations that only need one self-contained monitor.
 
-The web-888 integration uses two rotating monitor frames. At 12 kHz, 100-3100 Hz analysis bandwidth, time OSR 4, and frequency OSR 2, the approximate FST4W memory per channel is:
+The memory-constrained web-888 profile uses:
+
+- one shared FFT processor
+- two rotating waterfall frames, so decoding can overlap capture of the next slot
+- a 600-900 Hz analysis range matching web-888's existing 750 Hz BFO and 300 Hz WSPR filter
+- 6 kHz monitor processing with exact 12 kHz-to-6 kHz decimation
+- one streaming symbol buffer instead of retaining the complete T/R slot
+
+`monitor_stream_process_i16()` accepts arbitrary 12 kHz chunks and converts them directly into monitor blocks. Its input must already be band-limited below the monitor sample rate's Nyquist frequency; web-888's 600-900 Hz frontend filter satisfies this requirement.
+
+With time OSR 4 and frequency OSR 2, approximate FST4W memory is:
 
 | T/R period | Memory/channel | Channels within 384 MiB |
 |---:|---:|---:|
-| 15 s | 1.4 MiB | 264 |
-| 30 s | 2.9 MiB | 131 |
-| 60 s | 5.9 MiB | 65 |
-| 120 s | 11.8 MiB | 32 |
-| 300 s | 29.6 MiB | 12 |
-| 900 s | 88.9 MiB | 4 |
-| 1800 s | 177.8 MiB | 2 |
+| 15 s | 0.1 MiB | 4174 |
+| 30 s | 0.2 MiB | 2069 |
+| 60 s | 0.4 MiB | 1008 |
+| 120 s | 0.8 MiB | 499 |
+| 300 s | 1.9 MiB | 197 |
+| 900 s | 5.9 MiB | 65 |
+| 1800 s | 11.8 MiB | 32 |
 
-The 384 MiB limit reserves 128 MiB of a 512 MiB device for web-888 and other services. The integration must account for existing receiver load rather than treating these channel counts as unconditional capacity.
+The FST4W-1800 profile is approximately 15 times smaller than the previous 177.8 MiB design. The 384 MiB limit reserves 128 MiB of a 512 MiB device for web-888 and other services. CPU capacity and existing receiver load will impose much lower practical channel counts than the memory-only figures.
 
 The code is not yet really a library, rather a collection of routines and example code.
 
