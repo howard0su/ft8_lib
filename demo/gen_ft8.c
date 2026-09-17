@@ -174,16 +174,22 @@ int main(int argc, char** argv)
     int num_samples = (int)(0.5f + num_tones * symbol_period * sample_rate); // Number of samples in the data signal
     int num_silence = (slot_time * sample_rate - num_samples) / 2;           // Silence padding at both ends to make 15 seconds
     int num_total_samples = num_silence + num_samples + num_silence;         // Number of samples in the padded signal
-    float signal[num_total_samples];
-    for (int i = 0; i < num_silence; i++)
+    float* signal = (float*)calloc((size_t)num_total_samples, sizeof(float));
+    if (signal == NULL)
     {
-        signal[i] = 0;
-        signal[i + num_samples + num_silence] = 0;
+        LOG(LOG_ERROR, "ERROR: cannot allocate waveform buffer\n");
+        return -3;
     }
 
     // Synthesize waveform data (signal) and save it as WAV file
     synth_gfsk(tones, num_tones, frequency, symbol_bt, symbol_period, sample_rate, signal + num_silence);
-    save_wav(signal, num_total_samples, sample_rate, wav_path);
+    int save_rc = save_wav(signal, num_total_samples, sample_rate, wav_path);
+    free(signal);
+    if (save_rc < 0)
+    {
+        LOG(LOG_ERROR, "ERROR: cannot save wave file %s\n", wav_path);
+        return -4;
+    }
 
     return 0;
 }

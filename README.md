@@ -84,6 +84,24 @@ Key implementation details:
 * The decoder uses a rectangular FFT window (vs Hann for FT8/FT4) since FST4 tone spacing equals the FFT bin width, providing orthogonal tone detection
 * Tested against WSJT-X `fst4sim` signals from 0 to -20 dB SNR with 100% decode rate
 
+### Memory-constrained integration
+
+`monitor_get_memory_usage()` reports the heap required by one monitor before it is initialized. Integrations should include their sample buffers and number of rotating monitor frames when enforcing a process-wide memory budget. `monitor_init()` returns `false` for unsupported T/R periods, invalid configurations, or allocation failures.
+
+The web-888 integration uses two rotating monitor frames. At 12 kHz, 100-3100 Hz analysis bandwidth, time OSR 4, and frequency OSR 2, the approximate FST4W memory per channel is:
+
+| T/R period | Memory/channel | Channels within 384 MiB |
+|---:|---:|---:|
+| 15 s | 1.4 MiB | 264 |
+| 30 s | 2.9 MiB | 131 |
+| 60 s | 5.9 MiB | 65 |
+| 120 s | 11.8 MiB | 32 |
+| 300 s | 29.6 MiB | 12 |
+| 900 s | 88.9 MiB | 4 |
+| 1800 s | 177.8 MiB | 2 |
+
+The 384 MiB limit reserves 128 MiB of a 512 MiB device for web-888 and other services. The integration must account for existing receiver load rather than treating these channel counts as unconditional capacity.
+
 The code is not yet really a library, rather a collection of routines and example code.
 
 # Future ideas

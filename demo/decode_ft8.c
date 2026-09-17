@@ -359,7 +359,14 @@ int main(int argc, char** argv)
     }
     int sample_rate = 12000;
     int num_samples = slot_period * sample_rate;
-    float signal[num_samples];
+    size_t signal_bytes = (size_t)num_samples * sizeof(float);
+    float* signal = (float*)malloc(signal_bytes);
+    if (signal == NULL)
+    {
+        LOG(LOG_ERROR, "ERROR: cannot allocate %.1f MiB sample buffer\n",
+            signal_bytes / (1024.0 * 1024.0));
+        return -1;
+    }
     bool is_live = false;
 
     if (wav_path != NULL)
@@ -368,6 +375,7 @@ int main(int argc, char** argv)
         if (rc < 0)
         {
             LOG(LOG_ERROR, "ERROR: cannot load wave file %s\n", wav_path);
+            free(signal);
             return -1;
         }
         LOG(LOG_INFO, "Sample rate %d Hz, %d samples, %.3f seconds\n", sample_rate, num_samples, (double)num_samples / sample_rate);
@@ -403,7 +411,12 @@ int main(int argc, char** argv)
 
     hashtable_init();
 
-    monitor_init(&mon, &mon_cfg);
+    if (!monitor_init(&mon, &mon_cfg))
+    {
+        LOG(LOG_ERROR, "ERROR: invalid monitor configuration or insufficient memory\n");
+        free(signal);
+        return -1;
+    }
     LOG(LOG_DEBUG, "Waterfall allocated %d symbols\n", mon.wf.max_blocks);
 
     do
@@ -457,6 +470,7 @@ int main(int argc, char** argv)
     } while (is_live || stress--);
 
     monitor_free(&mon);
+    free(signal);
 
     return 0;
 }
