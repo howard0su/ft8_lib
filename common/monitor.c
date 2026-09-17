@@ -91,7 +91,9 @@ static bool monitor_make_plan(const monitor_config_t* cfg, monitor_plan_t* plan)
         nfft < 2 || nfft > INT_MAX)
         return false;
 
-    plan->block_size = (int)block_size;
+    plan->block_size = (int)lround(block_size);
+    if (plan->block_size % cfg->time_osr != 0)
+        return false;
     plan->subblock_size = plan->block_size / cfg->time_osr;
     plan->nfft = plan->block_size * cfg->freq_osr;
     if ((plan->nfft & 1) != 0)

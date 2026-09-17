@@ -76,6 +76,12 @@ static bool test_fst4w_period_memory(void)
         CHECK(usage.freqdata_bytes > 0);
         CHECK(usage.total_bytes > previous_total);
         previous_total = usage.total_bytes;
+
+        monitor_t mon;
+        CHECK(monitor_init(&mon, &cfg));
+        CHECK(mon.block_size == kFST4_NSPS[i]);
+        CHECK(mon.subblock_size * cfg.time_osr == mon.block_size);
+        monitor_free(&mon);
     }
 
     return true;
